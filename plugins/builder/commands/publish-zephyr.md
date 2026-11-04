@@ -9,7 +9,7 @@ disable-model-invocation: true
 Arguments: `$ARGUMENTS`
 
 **Manual invocation only.** This is the publish command: a QA action the user starts by typing it. `/builder:design-test-n-automation`,
-`/builder:design-test-cases`, every stage command, the orchestrator and every agent never run it, never offer to run it on
+`/builder:generate-test-cases`, every other command, the orchestrator and every agent never run it, never offer to run it on
 their own, and never pass it a file. If you reached this command from any other workflow rather than from the user typing it, stop and
 say so.
 

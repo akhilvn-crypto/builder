@@ -151,7 +151,7 @@
       }
     },
     "scheduler": {
-      "description": "Worker-pool settings. concurrency is the most story workers running at once (default 3, at most 5).",
+      "description": "Worker-pool settings. concurrency is the most story workers running at once (default 5, at most 5).",
       "type": "object",
       "additionalProperties": false,
       "properties": {

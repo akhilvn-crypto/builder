@@ -1,6 +1,6 @@
 ---
 name: workflow-resume
-description: Read the checkpoint state, verify source fingerprints and output hashes, classify each story, and resume an interrupted Test Design run without duplicating completed work or overwriting output. Also reports status. Use for /builder:design-resume, /builder:design-status, and when /builder:design-test-cases finds an existing run.
+description: Read the checkpoint state, verify source fingerprints and output hashes, classify each story, and resume an interrupted Test Design run without duplicating completed work or overwriting output. Also reports status. Use when /builder:generate-test-cases (or the design phase of /builder:design-test-n-automation) finds an existing run.
 user-invocable: false
 ---
 

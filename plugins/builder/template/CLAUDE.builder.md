@@ -11,9 +11,8 @@ handwritten and never modified by the pipeline.
 
 Commands: `/builder:do-automation` (init + the whole pipeline), `/builder:design-test-n-automation` (detailed stories in `stories/`
 → test design → test cases → automation readiness → Playwright scripts → execution → reports, the test cases handed forward by itself), `playwright-pipeline`,
-`generate-tests`, `run-tests`, `heal-tests`, `reports` (change which reports are produced), `init --update`. Test-design stages, each also on its own:
-`design-test-cases` (all of them), `analyse-stories`, `design-tests`, `generate-test-cases`, `design-resume`, `design-status`, `validate-test-cases`,
-`automation-readiness`. `publish-zephyr` publishes one test-case file to Zephyr Scale/Jira and is a manual QA command only. Their
+`generate-tests`, `run-tests`, `heal-tests`, `reports` (change which reports are produced), `init --update`. The whole test design on its own
+(stories → validated test cases, no automation; re-run to resume): `/builder:generate-test-cases`. `publish-zephyr` publishes one test-case file to Zephyr Scale/Jira and is a manual QA command only. Their
 skills hold the stage playbook, framework conventions and config precedence; read them when you work on that part.
 
 ## Hard rules

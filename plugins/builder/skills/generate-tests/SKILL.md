@@ -21,10 +21,10 @@ Read [../playwright-pipeline/environment.md](../playwright-pipeline/environment.
      1. If the saved configuration already points at other test cases that exist (`input.testCasesPath` is not
         `input/test-cases/design`), ask which to use: *Use the test cases from test design (Recommended)* / *Keep using the test cases at
         `<that path>`*. If they pick the second, carry on as before.
-     2. Check the design output is current: run `fingerprint-sources.py compare` as `/builder:design-status` does. Stories
+     2. Check the design output is current: run `fingerprint-sources.py compare` as the `workflow-resume` status report does. Stories
         listed as stale (their text changed after the test cases were generated) are named to the user, who chooses: continue with the
-        saved test cases (recommended only if the change is irrelevant), or stop and run `/builder:design-resume` first.
-        Stories not yet `saved` are named too, with `/builder:design-resume`; they are left out. If the user wants only some
+        saved test cases (recommended only if the change is irrelevant), or stop and run `/builder:generate-test-cases` first (it resumes).
+        Stories not yet `saved` are named too, with `/builder:generate-test-cases`; they are left out. If the user wants only some
         stories, pass `--story`.
      3. Hand the cases over: `pl design handoff [--story …]` (dry run), tell the user in two or three lines what is handed over and which
         cases are **manual** (with the reason; they are not automated) or **blocked**, then `pl design handoff … --apply`. A conflict

@@ -492,7 +492,7 @@ def cmd_complete(a) -> int:
     if problems:
         _record_failure(root, wf, sha, sid, "; ".join(problems), a.worker_ref)
         td.emit({"ok": False, "error": {"code": "INVALID_WORKER_OUTPUT", "message": "The analysis was rejected and is not passed "
-                 "downstream; the story is marked failed and can be retried alone with /builder:design-resume."}, "errors": problems})
+                 "downstream; the story is marked failed and can be retried alone by re-running /builder:generate-test-cases --retry-failed."}, "errors": problems})
         return td.EXIT_FINDINGS
     record = {"version": 1, "storyId": sid, "runId": wf["runId"], "inputFingerprint": an["inputFingerprint"],
               "completedAt": td.utc_now(), "result": result}

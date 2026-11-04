@@ -30,7 +30,7 @@ Separate from test-case generation and from every pipeline: nothing here runs un
 | Recorded progress | `zephyr-publish.py status --root R [--file FILE]` |
 | Settle an unknown create | `zephyr-publish.py resolve --root R --file FILE --case ID (--key PROJ-T123 \| --retry)` |
 
-Error codes arrive as `{"ok": false, "error": {"code", "message"}}`; relay the message and fix steps in plain words. Common ones: `CONFIG_MISSING`, `BASE_URL_INSECURE`, `DEPLOYMENT_UNSUPPORTED`, `AUTH` (token wrong/expired), `PROJECT_NOT_FOUND` (Zephyr Scale not enabled for that Jira project, or the token's user cannot open it), `FILE_MISSING`, `FILE_INVALID` (run `/builder:validate-test-cases`), `STORY_PROJECT_MISMATCH`, `STATE_CORRUPT`.
+Error codes arrive as `{"ok": false, "error": {"code", "message"}}`; relay the message and fix steps in plain words. Common ones: `CONFIG_MISSING`, `BASE_URL_INSECURE`, `DEPLOYMENT_UNSUPPORTED`, `AUTH` (token wrong/expired), `PROJECT_NOT_FOUND` (Zephyr Scale not enabled for that Jira project, or the token's user cannot open it), `FILE_MISSING`, `FILE_INVALID` (run `validate-test-cases.py` on the file, or re-run `/builder:generate-test-cases`), `STORY_PROJECT_MISMATCH`, `STATE_CORRUPT`.
 
 ## Mapping (Markdown -> Zephyr Scale Cloud v2)
 

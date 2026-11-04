@@ -16,10 +16,9 @@ COMMANDS = PLUGIN_ROOT / "commands"
 AGENTS = PLUGIN_ROOT / "agents"
 SKILLS = PLUGIN_ROOT / "skills"
 
-DESIGN_COMMANDS = {
-    "design-test-n-automation", "design-test-cases", "analyse-stories", "design-tests", "generate-test-cases",
-    "design-resume", "design-status", "validate-test-cases", "automation-readiness", "publish-zephyr",
-}
+DESIGN_COMMANDS = {"design-test-n-automation", "generate-test-cases", "publish-zephyr"}
+# the plugin's whole user-facing command set: test design, design + automation, and the separate automation flow
+ALL_COMMANDS = DESIGN_COMMANDS | {"do-automation"}
 DESIGN_AGENTS = {"story-analyser", "story-worker", "test-coverage-designer", "test-case-generator", "test-case-quality-checker",
                  "test-design-orchestrator"}
 DESIGN_SKILLS = {"story-analysis", "story-source-discovery", "test-case-authoring", "test-case-validation", "test-coverage-design",
@@ -43,7 +42,7 @@ def plugin_markdown() -> list[Path]:
 
 class Inventory(unittest.TestCase):
     def test_the_design_stages_are_part_of_the_plugin(self):
-        self.assertTrue(DESIGN_COMMANDS <= {p.stem for p in COMMANDS.glob("*.md")})
+        self.assertEqual(ALL_COMMANDS, {p.stem for p in COMMANDS.glob("*.md")})
         self.assertTrue(DESIGN_AGENTS <= {p.stem for p in AGENTS.glob("*.md")})
         self.assertTrue(DESIGN_SKILLS <= {p.parent.name for p in SKILLS.glob("*/SKILL.md")})
 
@@ -105,7 +104,7 @@ class PublishIsManualOnly(unittest.TestCase):
 
     ALLOWED = {  # files that may name the command, and then only to say it is not part of the workflow
         "commands/publish-zephyr.md", "skills/zephyr-publishing/SKILL.md", "commands/design-test-n-automation.md",
-        "commands/design-test-cases.md", "agents/test-design-orchestrator.md", "skills/playwright-pipeline/stages.md",
+        "commands/generate-test-cases.md", "agents/test-design-orchestrator.md", "skills/playwright-pipeline/stages.md",
     }
     NEGATING = re.compile(r"never|not\b|manual|separate|only the user|types? ", re.I)
 
@@ -151,10 +150,8 @@ class PublishIsManualOnly(unittest.TestCase):
 
 
 class StageScopes(unittest.TestCase):
-    def test_every_stage_command_names_its_scope(self):
-        expected = {"design-test-cases": "all", "analyse-stories": "analyse", "design-tests": "design", "generate-test-cases": "generate"}
-        for name, scope in expected.items():
-            self.assertIn(f"`SCOPE` = `{scope}`", (COMMANDS / f"{name}.md").read_text(encoding="utf-8"), name)
+    def test_the_design_command_names_its_scope(self):
+        self.assertIn("`SCOPE` = `all`", (COMMANDS / "generate-test-cases.md").read_text(encoding="utf-8"))
         orch = (AGENTS / "test-design-orchestrator.md").read_text(encoding="utf-8")
         for scope in ("all", "analyse", "design", "generate"):
             self.assertRegex(orch, rf"\| `{scope}`")

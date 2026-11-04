@@ -158,10 +158,10 @@ class Scheduling(Pool):
         self.assertEqual([d["storyId"] for d in out2["dispatched"]], ["US-103"])   # exactly the freed slot is refilled
         self.assertEqual(out2["running"], 2)
 
-    def test_default_is_three_and_more_than_five_is_refused(self):
+    def test_default_is_five_and_more_than_five_is_refused(self):
         out = self.nxt()
-        self.assertEqual(len(out["dispatched"]), 3)
-        self.assertEqual(self.wf()["scheduler"]["concurrency"], 3)
+        self.assertEqual(len(out["dispatched"]), len(STORIES))     # the fixture has 4 stories, below the default of 5
+        self.assertEqual(self.wf()["scheduler"]["concurrency"], 5)
         code, res = self.rc("configure", "--concurrency", "6", ok=False)
         self.assertEqual((code, res["error"]["code"]), (2, "CONCURRENCY_LIMIT"))
         self.rc("configure", "--concurrency", "5")
@@ -182,7 +182,7 @@ class Scheduling(Pool):
     def test_dependency_cycles_are_reported_and_do_not_deadlock(self):
         _, res = self.rc("configure", "--depends", "US-101=US-102", "--depends", "US-102=US-101")
         self.assertEqual(res["dependencyCycles"], [["US-101", "US-102"]])
-        self.assertEqual([d["storyId"] for d in self.nxt()["dispatched"]], ["US-101", "US-102", "US-103"])
+        self.assertEqual([d["storyId"] for d in self.nxt()["dispatched"]], ["US-101", "US-102", "US-103", "US-104"])
 
     def test_a_story_whose_dependency_failed_is_blocked_not_run(self):
         self.rc("configure", "--concurrency", "1", "--max-attempts", "1", "--depends", "US-102=US-101")

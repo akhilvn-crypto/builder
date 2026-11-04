@@ -424,7 +424,7 @@ def publish(root: Path, file: Path, project_key: str, story_key: str, issue_id: 
     doc, report = read_cases(file)
     if not report["ok"]:
         raise PublishError("FILE_INVALID", f"{Path(file).name} does not follow the supported test-case format "
-                           f"({report['summary']['errors']} error(s)). Run /builder:validate-test-cases first.", td.EXIT_USAGE)
+                           f"({report['summary']['errors']} error(s)). Run validate-test-cases.py on the file first.", td.EXIT_USAGE)
     cfg = None if dry_run else load_config(root)
     converted = [convert_case(doc, c, Path(file).name) for c in doc.cases]
     state = load_state(root)

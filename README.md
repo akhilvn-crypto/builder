@@ -117,7 +117,7 @@ cases at all. One command goes the whole way and hands each stage's output to th
 ```
 /builder:design-test-n-automation                 # reads stories/ , asks only what is genuinely yours to decide
 /builder:design-test-n-automation --story US-001,US-003
-/builder:design-test-n-automation --concurrency 5   # story workers at once (default 3, at most 5; 1 = one after another)
+/builder:design-test-n-automation --concurrency 5   # story workers at once (default 5, at most 5; 1 = one after another)
 /builder:design-test-n-automation resume          # continues where it stopped (design and automation both)
 ```
 
@@ -144,20 +144,16 @@ Every test stays traceable: **Story → Acceptance Criterion → Test Scenario �
 `dependencies/runs/<run-id>/traceability-report.md` shows, per story, each criterion with the cases that cover it and their results,
 the criteria no case covers, cases without a script or result, and the cases left manual.
 
-**Each stage on its own.** The same agents, scripts and checks run when you invoke a stage yourself, and each reads what the earlier
-stage left after checking it is still current (a missing or stale input is named, with the command that produces it; no earlier
-stage is run behind your back):
+**Three commands for this part** (everything else is internal; the same agents, scripts and checks run behind each):
 
-| Command | Stage |
+| Command | Does |
 |---|---|
-| `/builder:design-test-cases [stories path] [--story ids] [--concurrency n]` | all four design stages, no automation |
-| `/builder:analyse-stories` | story discovery and story analysis |
-| `/builder:design-tests` | test design (needs the analyses) |
-| `/builder:generate-test-cases` | test-case generation (needs the analyses and the design) |
-| `/builder:automation-readiness [--story ids] [--path p]` | readiness report; reads design output or any test-case path; writes nothing |
-| `/builder:generate-tests` | script generation and review; with no path it finds the design's test cases itself (and asks if you also have other cases configured) |
-| `/builder:run-tests`, `/builder:heal-tests <run-id>` | execution, triage, reports; bounded healing |
-| `/builder:design-status`, `design-resume`, `validate-test-cases` | read-only status; resume an interrupted design run; validate the saved cases |
+| `/builder:generate-test-cases [stories path] [--story ids] [--concurrency n] [--retry-failed]` | story discovery, analysis, test design, test-case generation and validation; saves one file per story; no automation. Re-run it to resume an interrupted run |
+| `/builder:design-test-n-automation [stories path] [--story ids] [--language ..] \| resume` | the above plus automation readiness, Playwright scripts, execution and reports in one flow |
+| `/builder:do-automation [test-case path] [--language ..] \| resume` | the separate automation flow for test cases you already have |
+
+The finer steps remain available as `/builder:generate-tests` (script generation and review; with no path it finds the design's test
+cases itself), `/builder:run-tests` and `/builder:heal-tests <run-id>` (execution, triage, reports; bounded healing).
 
 Supplying your own test cases still works exactly as before (`playwright-pipeline <path>`, `generate-tests <path>`, `do-automation <path>`);
 a path you give is always used and the design output is not consulted.

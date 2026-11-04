@@ -13,9 +13,10 @@ From the detailed stories in `stories/` to executed, reported Playwright tests:
 and one traceable chain for every test: **Story → Acceptance Criterion → Test Scenario → Test Case → Automation Script → Execution Result**.
 
 The test cases the design stages write (`test-design/test-cases/<story>-testcase.md`) are found and used by the automation stages by
-themselves. Do **not** ask the user for a test-case path, a file or a format in this command. Each stage can also be run alone
-(`analyse-stories`, `design-tests`, `generate-test-cases`, `automation-readiness`, `generate-tests`, `run-tests`, `heal-tests`); they
-use the same agents, scripts and checks as this command, and they read what the earlier stages left, after checking it is current.
+themselves. Do **not** ask the user for a test-case path, a file or a format in this command. The design half can also be run alone
+(`/builder:generate-test-cases`), and the automation half on test cases you already have (`/builder:do-automation`, or the single
+steps `generate-tests`, `run-tests`, `heal-tests`); they use the same agents, scripts and checks as this command, and they read what
+the earlier stages left, after checking it is current.
 
 Arguments: `$ARGUMENTS`
 
@@ -86,7 +87,7 @@ Print one line per step: `[design n/6] <step> … <status> — <note>`.
    `$ARGUMENTS` is the selection; with no selection every eligible story is processed. An existing design run: summarise it and resume
    it, or start a new run that extends it (it never overwrites saved cases).
 2. **Story analysis**, 3. **Test design**, 4. **Test-case generation:** the orchestrator's worker pool ("Phases 2-5 - Worker pool"):
-   one fresh `story-worker` per story, at most `--concurrency N` at once (default 3, at most 5), each doing analysis, design, generation,
+   one fresh `story-worker` per story, at most `--concurrency N` at once (default 5, at most 5), each doing analysis, design, generation,
    validation and the save of its own story's file; the orchestrator ingests the compact results and updates the shared state. Blocking
    questions a story leaves open are asked here, between batches.
    Report each story in one line, as the orchestrator does. A story that cannot be completed is reported and left out of the hand-over;
@@ -143,4 +144,4 @@ Give the final summary defined at the end of `stages.md` and add, in this order:
 
 Never call a run successful unless its status is `completed`, and never present a flaky pass as a pass. Close with the next steps:
 `/builder:run-tests` to run again, `/builder:heal-tests <runId>` for eligible script defects,
-and `/builder:design-status` to see the whole picture.
+and `/builder:design-test-n-automation resume` to pick the whole run up again.

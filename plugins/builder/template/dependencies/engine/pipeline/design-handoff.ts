@@ -172,7 +172,7 @@ export function designStatus(rootDir: string): DesignStatus {
     ok: false, designFolder: existsSync(dir), issues, designRunId: null, designRunStatus: null, stories: [],
     handoff: { exists: false, current: null, issues: [], stories: [] },
   };
-  if (!out.designFolder) { issues.push(`no ${DESIGN_DIRNAME}/ folder in the project: run /builder:design-test-cases first`); return out; }
+  if (!out.designFolder) { issues.push(`no ${DESIGN_DIRNAME}/ folder in the project: run /builder:generate-test-cases first`); return out; }
   const wf = readObject<DesignWorkflow>(path.join(dir, 'state', 'workflow.json'), 'the test-design checkpoint (state/workflow.json)', issues);
   if (!wf) return out;
   out.designRunId = wf.runId ?? null;
@@ -235,7 +235,7 @@ export function handOver(rootDir: string, opts: HandoffOptions = {}): HandoffRes
     imported: { created: [], updated: [], unchanged: [], removed: [] }, missingEnvVars: [], env: null, inputPath: HANDOFF_IMPORT_DIR, handoffFile: null,
   };
 
-  if (!existsSync(designDir)) { issues.push(`no ${DESIGN_DIRNAME}/ folder in the project: run /builder:design-test-cases first`); return result; }
+  if (!existsSync(designDir)) { issues.push(`no ${DESIGN_DIRNAME}/ folder in the project: run /builder:generate-test-cases first`); return result; }
   const wf = readObject<DesignWorkflow>(path.join(designDir, 'state', 'workflow.json'), 'the test-design checkpoint (state/workflow.json)', issues);
   const trace = readObject<DesignTraceability>(path.join(designDir, 'state', 'traceability.json'), 'the test-design traceability (state/traceability.json)', issues);
   if (!wf || !trace) return result;
@@ -250,7 +250,7 @@ export function handOver(rootDir: string, opts: HandoffOptions = {}): HandoffRes
   for (const id of considered) {
     if (!known.has(id)) { issues.push(`story ${id} is not part of the test-design run`); continue; }
     const s = wf.stories![id]!;
-    if (s.status !== 'saved' || !s.testCaseFile?.path) result.notHandedOver.push({ story: id, reason: `its test design is "${s.status ?? 'unknown'}", not saved: finish it with /builder:design-resume` });
+    if (s.status !== 'saved' || !s.testCaseFile?.path) result.notHandedOver.push({ story: id, reason: `its test design is "${s.status ?? 'unknown'}", not saved: finish it with /builder:generate-test-cases (it resumes)` });
   }
   const selected = wanted.filter((id) => saved.some(([sid]) => sid === id));
   if (selected.length === 0) issues.push(opts.stories?.length ? 'none of the chosen stories has saved test cases' : 'no story has saved test cases yet');

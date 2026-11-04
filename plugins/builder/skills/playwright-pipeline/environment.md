@@ -1,6 +1,6 @@
 # Running in Claude Code (CLI) and Claude Cowork
 
-Every pipeline command (`init`, `do-automation`, `design-test-n-automation`, `playwright-pipeline`, `generate-tests`, `run-tests`, `heal-tests`, `reports`) and every test-design command (`design-test-cases`, `analyse-stories`, `design-tests`, `generate-test-cases`, `design-resume`, `design-status`, `validate-test-cases`, `automation-readiness`) follows this page. The design scripts need Python 3.9+ on the machine (Cowork's sandbox normally has it); if it is missing, say so and ask before installing anything.
+Every pipeline command (`init`, `do-automation`, `design-test-n-automation`, `playwright-pipeline`, `generate-tests`, `run-tests`, `heal-tests`, `reports`) and the test-design command (`generate-test-cases`) follows this page. The design scripts need Python 3.9+ on the machine (Cowork's sandbox normally has it); if it is missing, say so and ask before installing anything.
 The pipeline is the same in both; what differs is how you reach the user and where files live.
 
 ## Asking the user

@@ -17,7 +17,7 @@ A path written from the project root (`automation/tests/x.spec.ts`, `dependencie
 accepted and normalized by the CLI. Package installs and `npx` tools run inside `automation/` (`cd automation && …`).
 Generated code uses the language chosen at init (`language` in the run config).
 
-**Runs that start from test design.** The design stages (`/builder:design-test-cases` and its stage commands; contract in
+**Runs that start from test design.** The design stages (`/builder:generate-test-cases`; contract in
 `agents/test-design-orchestrator.md`) write one validated Markdown file per story under `test-design/test-cases/` with their own
 checkpoint in `test-design/state/`. They are not stages of the run: they come first, like importing test cases does, and keep their own
 resumable state. `pl design handoff --apply` is the bridge: it checks the design output is unchanged since the design run recorded it,

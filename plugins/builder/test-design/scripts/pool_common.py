@@ -37,7 +37,7 @@ def _load_script(module_name: str, file_name: str):
 
 sas = _load_script("story_analysis_state", "story-analysis-state.py")
 
-DEFAULT_CONCURRENCY = 3
+DEFAULT_CONCURRENCY = 5
 MAX_CONCURRENCY = 5
 DEFAULT_MAX_ATTEMPTS = 2          # the first try plus one retry
 DEFAULT_LEASE_MINUTES = 30

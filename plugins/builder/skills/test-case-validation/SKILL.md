@@ -1,6 +1,6 @@
 ---
 name: test-case-validation
-description: Validate drafted or saved test cases (structure, IDs, data and env references, dependencies, expected results, duplicates, traceability) with the deterministic scripts, interpret every finding code, apply safe fixes, and decide what may be saved. Use before every save and in /builder:validate-test-cases.
+description: Validate drafted or saved test cases (structure, IDs, data and env references, dependencies, expected results, duplicates, traceability) with the deterministic scripts, interpret every finding code, apply safe fixes, and decide what may be saved. Use before every save.
 user-invocable: false
 ---
 
@@ -14,7 +14,7 @@ Two layers. **Deterministic** (scripts, authoritative for structure) and **seman
 - Formatting fixes: `... --fix-safe --fix-output <fixed.md>` writes a normalised copy (trailing spaces, step numbering, bullet markers, spacing around `-> Expected:`, blank lines). It never edits the input and never changes meaning; it cannot invent IDs.
 - One saved story file: `PY SCRIPTS/validate-test-cases.py "<root>/test-design/test-cases/S-testcase.md" --story-id S --check-file-name` and
   `PY SCRIPTS/validate-traceability.py --test-cases "<root>/test-design/test-cases/S-testcase.md" --traceability "<root>/test-design/state/traceability.json"` (reads only that file; the story is taken from the file name).
-- Whole folder (the `/validate` command and the end of a run): `PY SCRIPTS/validate-test-cases.py --dir "<root>/test-design/test-cases"` validates each `<USER_STORY_ID>-testcase.md` against its own story and then the rules that span files; `PY SCRIPTS/validate-traceability.py --test-cases-dir "<root>/test-design/test-cases" --traceability "<root>/test-design/state/traceability.json" --fingerprints "<root>/test-design/state/source-fingerprints.json"`. Each finding in the directory report carries its `file`. Add `--story-id S` to the traceability call to check one story from the folder.
+- Whole folder (the end of a run): `PY SCRIPTS/validate-test-cases.py --dir "<root>/test-design/test-cases"` validates each `<USER_STORY_ID>-testcase.md` against its own story and then the rules that span files; `PY SCRIPTS/validate-traceability.py --test-cases-dir "<root>/test-design/test-cases" --traceability "<root>/test-design/state/traceability.json" --fingerprints "<root>/test-design/state/source-fingerprints.json"`. Each finding in the directory report carries its `file`. Add `--story-id S` to the traceability call to check one story from the folder.
 
 Read `summary` and `findings` (each: `code`, `severity`, `message`, `line`, `caseId`) and the per-case `valid` flag.
 
