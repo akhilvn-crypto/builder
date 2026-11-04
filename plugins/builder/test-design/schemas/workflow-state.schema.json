@@ -1,0 +1,157 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Test Design workflow state",
+  "description": "test-design/state/workflow.json: checkpoint for one run. Contains no secret values.",
+  "type": "object",
+  "required": ["version", "runId", "status", "projectRoot", "sourceFiles", "currentPhase", "stories", "createdAt", "updatedAt"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "runId": { "type": "string", "pattern": "^run-[0-9]{8}-[0-9]{6}$" },
+    "status": { "type": "string", "enum": ["in_progress", "awaiting_user", "completed", "completed_with_warnings", "failed"] },
+    "projectRoot": { "type": "string", "minLength": 1 },
+    "sourceFiles": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "currentPhase": { "type": "string", "enum": ["discover", "analyse", "design", "generate", "validate", "save", "finalise", "done"] },
+    "currentStoryId": { "type": ["string", "null"] },
+    "sharedRulesFile": {
+      "description": "Optional Markdown file of project-level rules/conventions (one rule per heading) that stories may rely on. Path relative to the project root, or absolute.",
+      "type": ["string", "null"]
+    },
+    "stories": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["status"],
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["pending", "analysing", "designing", "generating", "validating", "saved", "skipped", "needs_clarification", "failed"]
+          },
+          "sourceFile": { "type": "string" },
+          "testCaseFile": {
+            "description": "This story's own test-case file (test-design/test-cases/<USER_STORY_ID>-testcase.md), recorded after each save. sourceSha256 is the story fingerprint the cases were generated from, which is how a changed story marks only its own file as stale.",
+            "type": "object",
+            "required": ["path"],
+            "additionalProperties": false,
+            "properties": {
+              "path": { "type": "string", "minLength": 1 },
+              "sha256": { "type": "string" },
+              "caseCount": { "type": "integer", "minimum": 0 },
+              "sourceSha256": { "type": "string" },
+              "updatedAt": { "type": "string" }
+            }
+          },
+          "testCaseIds": { "type": "array", "items": { "type": "string" } },
+          "validation": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "status": { "type": "string", "enum": ["not_run", "passed", "passed_with_warnings", "failed"] },
+              "errors": { "type": "integer", "minimum": 0 },
+              "warnings": { "type": "integer", "minimum": 0 },
+              "findings": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["code", "severity", "message"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": { "type": "string" },
+                    "severity": { "type": "string", "enum": ["error", "warning"] },
+                    "message": { "type": "string" },
+                    "caseId": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "clarification": { "type": ["string", "null"] },
+          "lastCompletedStage": { "type": "string", "enum": ["analyse", "design", "generate", "validate", "save"] },
+          "analysis": {
+            "description": "Isolated story-analysis checkpoint. The structured result lives in resultPath; no worker transcript is stored.",
+            "type": "object",
+            "required": ["status"],
+            "additionalProperties": false,
+            "properties": {
+              "status": { "type": "string", "enum": ["not_started", "in_progress", "completed", "failed"] },
+              "attempts": { "type": "integer", "minimum": 0 },
+              "sourceSha256": { "type": "string", "description": "Fingerprint of the story the analysis was made from." },
+              "sharedRules": { "type": "object", "description": "rule id -> fingerprint of each shared rule given to the worker.", "additionalProperties": { "type": "string" } },
+              "dependencies": { "type": "object", "description": "story id -> fingerprint of each dependency excerpt given to the worker.", "additionalProperties": { "type": "string" } },
+              "inputFingerprint": { "type": "string" },
+              "resultPath": { "type": "string" },
+              "startedAt": { "type": "string" },
+              "completedAt": { "type": "string" },
+              "failure": {
+                "type": "object",
+                "required": ["reason", "at"],
+                "additionalProperties": false,
+                "properties": { "reason": { "type": "string" }, "at": { "type": "string" } }
+              },
+              "invalidatedBy": { "type": "array", "items": { "type": "string" } }
+            }
+          },
+          "updatedAt": { "type": "string" }
+        }
+      }
+    },
+    "lastCompletedOperation": {
+      "type": ["object", "null"],
+      "required": ["name", "completedAt"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "storyId": { "type": ["string", "null"] },
+        "completedAt": { "type": "string" }
+      }
+    },
+    "inProgressOperation": {
+      "type": ["object", "null"],
+      "required": ["name", "startedAt"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "storyId": { "type": ["string", "null"] },
+        "startedAt": { "type": "string" }
+      }
+    },
+    "outputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "testCases": {
+          "description": "The test-cases folder. Each story's file, hash and case count are recorded on the story (stories.<id>.testCaseFile). path and sha256 are kept only for runs made before one file per story, where they describe the old consolidated test-cases.md.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "directory": { "type": "string" },
+            "fileNamePattern": { "type": "string" },
+            "fileCount": { "type": "integer", "minimum": 0 },
+            "caseCount": { "type": "integer", "minimum": 0 },
+            "updatedAt": { "type": "string" },
+            "path": { "type": "string" },
+            "sha256": { "type": "string" }
+          }
+        },
+        "traceability": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "path": { "type": "string" }, "sha256": { "type": "string" } }
+        },
+        "fingerprints": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "path": { "type": "string" }, "sha256": { "type": "string" } }
+        },
+        "audit": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "path": { "type": "string" } }
+        }
+      }
+    },
+    "createdAt": { "type": "string" },
+    "updatedAt": { "type": "string" }
+  }
+}

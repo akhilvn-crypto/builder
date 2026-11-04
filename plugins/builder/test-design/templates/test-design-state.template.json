@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "runId": "run-YYYYMMDD-HHMMSS",
+  "status": "in_progress",
+  "projectRoot": "<absolute project root>",
+  "sourceFiles": ["<story file relative to the project root>"],
+  "sharedRulesFile": null,
+  "currentPhase": "discover",
+  "currentStoryId": null,
+  "stories": {
+    "US-001": { "status": "pending", "sourceFile": "<story file>", "testCaseIds": [] }
+  },
+  "lastCompletedOperation": null,
+  "inProgressOperation": null,
+  "outputs": {
+    "testCases": { "directory": "test-design/test-cases", "fileNamePattern": "<USER_STORY_ID>-testcase.md" },
+    "traceability": { "path": "test-design/state/traceability.json" },
+    "fingerprints": { "path": "test-design/state/source-fingerprints.json" },
+    "audit": { "path": "test-design/state/audit.jsonl" }
+  },
+  "createdAt": "<UTC ISO-8601>",
+  "updatedAt": "<UTC ISO-8601>"
+}

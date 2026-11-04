@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Story analysis result (schema version 2)",
+  "description": "Compact handoff returned by one story-analyser invocation for exactly one story. Internal to the pipeline: consumed by test-coverage-designer, never a user-facing report and never appended to a source story. Optional empty fields are omitted.",
+  "type": "object",
+  "required": ["story_id", "story_summary", "behaviour_to_validate", "acceptance_criteria_interpretation", "analysis_complete"],
+  "additionalProperties": false,
+  "properties": {
+    "story_id": { "type": "string", "minLength": 1 },
+    "title": { "type": "string" },
+    "story_summary": { "type": "string", "minLength": 1 },
+    "behaviour_to_validate": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "acceptance_criteria_interpretation": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["label", "text"],
+        "additionalProperties": false,
+        "properties": {
+          "label": { "type": "string", "pattern": "^AC-[0-9]+$" },
+          "text": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "business_rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["label", "text"],
+        "additionalProperties": false,
+        "properties": {
+          "label": { "type": "string", "pattern": "^BR-[0-9]+$" },
+          "text": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "preconditions": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "dependencies": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "relevant_non_functional_expectations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["label", "text"],
+        "additionalProperties": false,
+        "properties": {
+          "label": { "type": "string", "pattern": "^NFR-[0-9]+$" },
+          "text": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "test_design_considerations": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "messages": {
+      "description": "Exact UI texts, URLs or values the story states, so expected results can quote them.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "ambiguities": {
+      "description": "Missing or unclear information. blocking=true only when it stops an assertable expected result for a stated criterion; the orchestrator asks the user about those and only those.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["question", "blocking"],
+        "additionalProperties": false,
+        "properties": {
+          "question": { "type": "string", "minLength": 1 },
+          "blocking": { "type": "boolean" },
+          "why": { "type": "string" },
+          "blocks": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "testable": { "type": "boolean" },
+    "not_testable_reason": { "type": "string", "minLength": 1 },
+    "analysis_complete": { "type": "boolean" }
+  }
+}

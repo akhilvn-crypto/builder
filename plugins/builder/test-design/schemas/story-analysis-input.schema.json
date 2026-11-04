@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Story analysis worker input (schema version 2)",
+  "description": "The only data a fresh story-analyser invocation receives: one story, the shared rules relevant to it, a read-only dependency summary where needed, and the instructions. Never the workflow state, other stories, other analyses or transcripts.",
+  "type": "object",
+  "required": ["run_id", "story_id", "story_content", "relevant_shared_rules", "dependency_context", "analysis_instructions", "output_schema_version"],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": { "type": "string", "pattern": "^run-[0-9]{8}-[0-9]{6}$" },
+    "story_id": { "type": "string", "minLength": 1 },
+    "story_content": { "type": "string", "minLength": 1 },
+    "relevant_shared_rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["rule_id", "text"],
+        "additionalProperties": false,
+        "properties": {
+          "rule_id": { "type": "string", "minLength": 1 },
+          "title": { "type": "string" },
+          "text": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "dependency_context": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["story_id", "excerpt", "read_only"],
+        "additionalProperties": false,
+        "properties": {
+          "story_id": { "type": "string", "minLength": 1 },
+          "title": { "type": "string" },
+          "excerpt": { "type": "string", "minLength": 1 },
+          "read_only": { "type": "boolean", "const": true }
+        }
+      }
+    },
+    "analysis_instructions": { "type": "string", "minLength": 1 },
+    "output_schema_version": { "type": "integer", "const": 2 }
+  }
+}

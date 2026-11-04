@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Test Design traceability",
+  "description": "test-design/state/traceability.json: which stories each generated test case verifies.",
+  "type": "object",
+  "required": ["version", "stories", "cases"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "updatedAt": { "type": "string" },
+    "stories": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["sourceFile"],
+        "additionalProperties": false,
+        "properties": {
+          "sourceFile": { "type": "string", "minLength": 1 },
+          "title": { "type": "string" },
+          "criteria": {
+            "description": "Labels of the acceptance criteria / business rules / NFRs found in the story (AC-1, BR-1, NFR-1).",
+            "type": "array",
+            "items": { "type": "string", "pattern": "^[^#\\s]+$" }
+          },
+          "status": { "type": "string", "enum": ["analysed", "no_testable_behaviour"] },
+          "testCaseFile": {
+            "description": "Project-root-relative path of this story's own test-case file, test-design/test-cases/<USER_STORY_ID>-testcase.md.",
+            "type": "string",
+            "pattern": "^[^\\\\]+-testcase\\.md$"
+          }
+        }
+      }
+    },
+    "cases": {
+      "type": "object",
+      "additionalProperties": { "$ref": "test-case-metadata.schema.json" }
+    }
+  }
+}

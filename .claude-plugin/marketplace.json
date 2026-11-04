@@ -1,18 +1,18 @@
 {
-  "name": "automation-builder-marketplace",
-  "description": "Marketplace for the Automation Builder agentic Playwright pipeline plugin.",
+  "name": "builder-marketplace",
+  "description": "Marketplace for the Builder agentic Playwright pipeline plugin.",
   "owner": {
     "name": "Akhil V Nair",
     "email": "akhilvnair1999@gmail.com"
   },
   "plugins": [
     {
-      "name": "automation-builder",
-      "source": "./plugins/automation-builder",
-      "description": "Agentic Playwright pipeline: test cases in, reviewed + executed + bounded self-healing Playwright tests and reports out.",
-      "version": "0.22.0",
+      "name": "builder",
+      "source": "./plugins/builder",
+      "description": "Agentic test pipeline: user stories in, designed test cases, reviewed + executed + bounded self-healing Playwright tests and traceable reports out (or bring your own test cases).",
+      "version": "0.23.0",
       "category": "testing",
-      "tags": ["playwright", "testing", "qa", "e2e"]
+      "tags": ["playwright", "testing", "qa", "e2e", "test-design"]
     }
   ]
 }
