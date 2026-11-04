@@ -26,7 +26,7 @@
         "properties": {
           "status": {
             "type": "string",
-            "enum": ["pending", "analysing", "designing", "generating", "validating", "saved", "skipped", "needs_clarification", "failed"]
+            "enum": ["pending", "running", "analysing", "designing", "generating", "validating", "saved", "skipped", "needs_clarification", "failed"]
           },
           "sourceFile": { "type": "string" },
           "testCaseFile": {
@@ -39,6 +39,7 @@
               "sha256": { "type": "string" },
               "caseCount": { "type": "integer", "minimum": 0 },
               "sourceSha256": { "type": "string" },
+              "designRulesSha256": { "type": "string", "description": "Fingerprint of the design rules (rules/*.md and the test-case template) the file was generated under. A change flags the file for reconciliation; it never regenerates silently." },
               "updatedAt": { "type": "string" }
             }
           },
@@ -67,6 +68,59 @@
             }
           },
           "clarification": { "type": ["string", "null"] },
+          "dependsOn": { "description": "Stories this story genuinely depends on (declared, not merely mentioned). It is scheduled only after each of them has finished.", "type": "array", "items": { "type": "string" } },
+          "clarifications": {
+            "description": "The user's answers to blocking questions for this story; passed to its next worker as confirmed context.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["question", "answer"],
+              "additionalProperties": false,
+              "properties": { "question": { "type": "string" }, "answer": { "type": "string" }, "declined": { "type": "boolean" }, "at": { "type": "string" } }
+            }
+          },
+          "metrics": {
+            "description": "Cost of the story's last worker. Tokens and elapsed time are recorded separately: parallel workers shorten elapsed time but do not reduce total tokens.",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": { "tokens": { "type": "integer", "minimum": 0 }, "durationMs": { "type": "integer", "minimum": 0 }, "attempts": { "type": "integer", "minimum": 0 } }
+          },
+          "execution": {
+            "description": "Worker-pool bookkeeping. Written only by the orchestrator (story-run.py), never by a worker.",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "attempts": { "type": "integer", "minimum": 0, "description": "Retry budget used. A clarification or an explicit retry request gives attempts back." },
+              "dispatchCount": { "type": "integer", "minimum": 0, "description": "Number of worker runs ever started for this story. Never reset; it identifies the run a result belongs to." },
+              "mode": { "type": "string", "enum": ["create", "append", "stage_only"] },
+              "ruleIds": { "type": "array", "items": { "type": "string" } },
+              "adopt": { "type": "boolean", "description": "The user agreed that this story's untracked existing file may be appended to." },
+              "dispatchedAt": { "type": "string" },
+              "leaseExpiresAt": { "type": "string" },
+              "workerRef": { "type": "string" },
+              "lastError": {
+                "type": "object",
+                "required": ["code", "message"],
+                "additionalProperties": false,
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" }, "at": { "type": "string" } }
+              },
+              "awaiting": { "type": ["string", "null"], "enum": ["clarification", "decision", null] },
+              "questions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["question"],
+                  "additionalProperties": false,
+                  "properties": { "question": { "type": "string" }, "blockedCriteria": { "type": "array", "items": { "type": "string" } } }
+                }
+              },
+              "decision": {
+                "type": ["object", "null"],
+                "additionalProperties": false,
+                "properties": { "code": { "type": "string" }, "message": { "type": "string" }, "draftPath": { "type": "string" }, "metaPath": { "type": "string" } }
+              }
+            }
+          },
           "lastCompletedStage": { "type": "string", "enum": ["analyse", "design", "generate", "validate", "save"] },
           "analysis": {
             "description": "Isolated story-analysis checkpoint. The structured result lives in resultPath; no worker transcript is stored.",
@@ -94,6 +148,20 @@
           },
           "updatedAt": { "type": "string" }
         }
+      }
+    },
+    "scheduler": {
+      "description": "Worker-pool settings. concurrency is the most story workers running at once (default 3, at most 5).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "concurrency": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "maxAttempts": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "leaseMinutes": { "type": "integer", "minimum": 1 },
+        "designRulesSha256": { "type": "string" },
+        "runtimeParallelism": { "type": "string", "enum": ["unverified", "parallel", "sequential"] },
+        "observedConcurrency": { "type": "integer", "minimum": 0 },
+        "startedAt": { "type": "string" }
       }
     },
     "lastCompletedOperation": {

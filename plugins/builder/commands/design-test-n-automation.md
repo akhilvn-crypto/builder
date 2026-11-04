@@ -1,6 +1,6 @@
 ---
 description: Detailed user stories to executed Playwright tests in one flow - story discovery, story analysis, test design, test-case generation, automation readiness, script generation, execution and reporting. The generated test cases are handed forward automatically; you never supply them. Stops only where a decision is yours. Never publishes.
-argument-hint: "[stories folder | story file] [--story US-001,US-002] [--language typescript|javascript] | resume [<run-id>]"
+argument-hint: "[stories folder | story file] [--story US-001,US-002] [--concurrency 1-5] [--language typescript|javascript] | resume [<run-id>]"
 disable-model-invocation: true
 ---
 
@@ -85,8 +85,10 @@ Print one line per step: `[design n/6] <step> … <status> — <note>`.
    files, duplicate or inferred story IDs, and in **one** question the files, the story selection and the project root. `--story` in
    `$ARGUMENTS` is the selection; with no selection every eligible story is processed. An existing design run: summarise it and resume
    it, or start a new run that extends it (it never overwrites saved cases).
-2. **Story analysis**, 3. **Test design**, 4. **Test-case generation:** the orchestrator's per-story loop A-E, one story at a time, each
-   story analysed in its own fresh worker, validated and saved before the next. Blocking questions a story leaves open are asked here.
+2. **Story analysis**, 3. **Test design**, 4. **Test-case generation:** the orchestrator's worker pool ("Phases 2-5 - Worker pool"):
+   one fresh `story-worker` per story, at most `--concurrency N` at once (default 3, at most 5), each doing analysis, design, generation,
+   validation and the save of its own story's file; the orchestrator ingests the compact results and updates the shared state. Blocking
+   questions a story leaves open are asked here, between batches.
    Report each story in one line, as the orchestrator does. A story that cannot be completed is reported and left out of the hand-over;
    it never stops the stories that can. If **no** story ends up saved, stop (blocked) with why and
    `/builder:design-test-n-automation resume`.

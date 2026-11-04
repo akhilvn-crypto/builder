@@ -1,0 +1,87 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Story worker result",
+  "description": "test-design/state/results/<story-id>.result.json: written by the one worker that processed the story. It is the durable record the orchestrator ingests into the shared state, and the metadata used to reconcile after a crash. Holds no transcript and no secret values.",
+  "type": "object",
+  "required": ["version", "storyId", "runId", "attempt", "status", "startedAt"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "storyId": { "type": "string", "minLength": 1 },
+    "runId": { "type": "string", "pattern": "^run-[0-9]{8}-[0-9]{6}$" },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "status": {
+      "type": "string",
+      "enum": ["running", "saving", "saved", "staged", "needs_clarification", "needs_decision", "not_testable", "failed"]
+    },
+    "startedAt": { "type": "string" },
+    "finishedAt": { "type": "string" },
+    "sourceSha256": { "type": "string" },
+    "inputFingerprint": { "type": "string" },
+    "outputFile": {
+      "type": "object",
+      "required": ["path"],
+      "additionalProperties": false,
+      "properties": { "path": { "type": "string" }, "sha256": { "type": "string" }, "caseCount": { "type": "integer", "minimum": 0 } }
+    },
+    "added": { "type": "array", "items": { "type": "string" } },
+    "testCaseIds": { "type": "array", "items": { "type": "string" } },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": { "type": "string", "enum": ["not_run", "passed", "passed_with_warnings", "failed"] },
+        "errors": { "type": "integer", "minimum": 0 },
+        "warnings": { "type": "integer", "minimum": 0 },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["code", "severity", "message"],
+            "additionalProperties": false,
+            "properties": {
+              "code": { "type": "string" },
+              "severity": { "type": "string", "enum": ["error", "warning"] },
+              "message": { "type": "string" },
+              "caseId": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "dependenciesUsed": { "type": "array", "items": { "type": "string" } },
+    "criteria": { "type": "array", "items": { "type": "string" } },
+    "uncovered": {
+      "type": "array",
+      "items": { "type": "object", "required": ["label", "reason"], "additionalProperties": false, "properties": { "label": { "type": "string" }, "reason": { "type": "string" } } }
+    },
+    "analysis": { "$ref": "story-analysis" },
+    "trace": {
+      "type": "object",
+      "required": ["cases"],
+      "additionalProperties": false,
+      "properties": { "cases": { "type": "object", "additionalProperties": { "$ref": "test-case-metadata.schema.json" } } }
+    },
+    "clarifications": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["question"],
+        "additionalProperties": false,
+        "properties": { "question": { "type": "string" }, "blockedCriteria": { "type": "array", "items": { "type": "string" } } }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "code": { "type": "string" }, "message": { "type": "string" }, "draftPath": { "type": "string" }, "metaPath": { "type": "string" } }
+    },
+    "userEditsDetected": { "type": "boolean" },
+    "error": {
+      "type": "object",
+      "required": ["code", "message"],
+      "additionalProperties": false,
+      "properties": { "code": { "type": "string" }, "message": { "type": "string" } }
+    }
+  }
+}

@@ -1,6 +1,6 @@
 ---
 description: Resume an interrupted test-design run safely - verifies the checkpoint, output hashes and source fingerprints, continues only unfinished stories, and asks before reconciling stories that changed. Never regenerates or overwrites existing test cases on its own.
-argument-hint: "[project root]"
+argument-hint: "[project root] [--concurrency 1-5] [--retry-failed]"
 disable-model-invocation: true
 ---
 
@@ -16,7 +16,9 @@ verify output hashes and source fingerprints, classify every story, and present 
 source changes, and new. A story that stopped after analysis or after test design continues from there. For stories that changed since
 generation, ask story by story whether to keep, regenerate that story's file (dry run first) or skip; never regenerate, replace or delete
 anything without that yes. If the checkpoint or outputs are missing or corrupt, explain the problem and ask how to proceed; never assume
-the work was completed. Then continue the per-story loop (`SCOPE` = `all`) for the incomplete stories only and finish with the
-orchestrator's summary. If nothing is incomplete, say so and point to `/builder:validate-test-cases`.
+the work was completed. Then continue the orchestrator's worker pool (`SCOPE` = `all`) for the incomplete stories only, starting with
+`story-run.py next --reclaim` (it adopts what an interrupted worker had finished and releases the rest; stories already `saved` and unchanged
+are never rerun). `--retry-failed` gives a story that exhausted its retries a fresh, bounded retry budget; it is used only when the user asks
+for it. Finish with the orchestrator's summary. If nothing is incomplete, say so and point to `/builder:validate-test-cases`.
 
 To resume a whole `/builder:design-test-n-automation` workflow, use that command with `resume`.

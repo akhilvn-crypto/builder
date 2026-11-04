@@ -33,10 +33,13 @@ Knowledge skills (loaded automatically by Claude and the agents): `pipeline-setu
 `auto-healing`, `test-reporting`.
 
 Agents: `builder:test-analyst`, `application-explorer`, `playwright-generator`, `test-reviewer`,
-`test-executor`, `failure-healer`, `data-cleaner`; for test design `story-analyser`, `test-coverage-designer`, `test-case-generator`,
-`test-case-quality-checker` (workers that return structured results) and `test-design-orchestrator` (a contract the main session follows, not a subagent).
+`test-executor`, `failure-healer`, `data-cleaner`; for test design `story-worker` (the one reusable worker of the pool: analyse, design, generate, validate and save one story, fresh per story, several at a time),
+`story-analyser`, `test-coverage-designer`, `test-case-generator`,
+`test-case-quality-checker` (the one-stage workers the scoped commands use; they return structured results) and `test-design-orchestrator` (a contract the main session follows, not a subagent).
 
-Test design (`test-design/` in the plugin) is the Python tooling of the TDA plugin, integrated rather than rebuilt: `rules/`, `schemas/`, `scripts/`, `templates/` and
+Test design (`test-design/` in the plugin) is the Python tooling of the TDA plugin, integrated rather than rebuilt: `rules/` (including the compact
+`worker-standards.md` a worker reads instead of all four rule files), `schemas/`, `scripts/` (`story-run.py` = the orchestrator's scheduler and central result
+manager, `story-worker.py` = the worker's two-file-only commands, `pool_common.py`), `templates/` and
 its unittest suite (`python -m unittest discover -s tests -t tests` from `test-design/`). It writes `<project>/test-design/` and never touches your stories.
 The engine side of the hand-over is `dependencies/engine/pipeline/design-handoff.ts`, `readiness.ts` and `traceability-report.ts` (CLI group `design`:
 `status`, `readiness`, `handoff [--apply]`, `attach`, `trace`).

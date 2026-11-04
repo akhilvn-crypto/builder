@@ -532,11 +532,11 @@ class PluginContract(unittest.TestCase):
 
     def test_a_single_reusable_worker_definition_exists(self):
         agents = {p.name for p in (PLUGIN_ROOT / "agents").glob("*.md")}
-        design = {"story-analyser.md", "test-case-generator.md", "test-case-quality-checker.md",
+        design = {"story-analyser.md", "story-worker.md", "test-case-generator.md", "test-case-quality-checker.md",
                   "test-coverage-designer.md", "test-design-orchestrator.md"}
         self.assertTrue(design <= agents, design - agents)
-        # no per-story agents: the design agents are exactly these five
-        self.assertFalse({a for a in agents if a.startswith("story-")} - {"story-analyser.md"})
+        # no per-story agents: one reusable analyser (scoped stage) and one reusable worker (the pool), nothing named after a story
+        self.assertFalse({a for a in agents if a.startswith("story-")} - {"story-analyser.md", "story-worker.md"})
 
     def test_worker_cannot_spawn_agents_or_write(self):
         tools = {t.strip() for t in self.frontmatter("agents/story-analyser.md")["tools"].split(",")}
@@ -547,9 +547,10 @@ class PluginContract(unittest.TestCase):
         for phrase in ("exactly one story", "fresh", "never go looking", "one JSON object", "other story"):
             self.assertIn(phrase, text)
 
-    def test_orchestrator_invokes_one_fresh_worker_per_story_sequentially(self):
+    def test_orchestrator_invokes_one_fresh_worker_per_story_sequentially_for_the_analyse_stage_and_a_bounded_pool_for_all(self):
         text = self.read("agents/test-design-orchestrator.md").replace("*", "")
-        for phrase in ("story-analysis-state.py", "fresh", "SendMessage", "one worker at a time", "sequential", "Never continue an earlier worker"):
+        for phrase in ("story-analysis-state.py", "fresh", "SendMessage", "at a time", "sequential", "Never continue an earlier worker",
+                       "bounded", "builder:story-worker", "never give a worker a second story"):
             self.assertIn(phrase, text)
         self.assertNotIn("the paths of the other stories", text)
 

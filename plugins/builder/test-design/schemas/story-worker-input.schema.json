@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Story worker input",
+  "description": "The only data a fresh story-worker receives: the seven story-analysis input fields (one story, the shared rules relevant to it, a read-only dependency summary) plus worker_contract, which says where the worker may write. Never the workflow state, other stories, other analyses, other test cases or transcripts.",
+  "type": "object",
+  "required": ["run_id", "story_id", "story_content", "relevant_shared_rules", "dependency_context", "analysis_instructions", "output_schema_version", "worker_contract"],
+  "additionalProperties": false,
+  "properties": {
+    "run_id": { "type": "string", "pattern": "^run-[0-9]{8}-[0-9]{6}$" },
+    "story_id": { "type": "string", "minLength": 1 },
+    "story_content": { "type": "string", "minLength": 1 },
+    "relevant_shared_rules": { "type": "array" },
+    "dependency_context": { "type": "array" },
+    "analysis_instructions": { "type": "string", "minLength": 1 },
+    "output_schema_version": { "type": "integer", "const": 2 },
+    "worker_contract": {
+      "type": "object",
+      "required": ["schema_version", "attempt", "project_root", "scratch_dir", "result_path", "output", "traceability_path", "standards_file", "source_sha256", "input_fingerprint", "confirmed_decisions"],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": { "type": "integer", "const": 1 },
+        "attempt": { "type": "integer", "minimum": 1 },
+        "project_root": { "type": "string", "minLength": 1 },
+        "scratch_dir": { "type": "string", "minLength": 1, "description": "Worker-specific temporary folder outside the project. Drafts and the analysis are written here." },
+        "result_path": { "type": "string", "pattern": "^test-design/state/results/[^/\\\\]+\\.result\\.json$", "description": "The one state file this worker may write, besides its own test-case file." },
+        "output": {
+          "type": "object",
+          "required": ["path", "mode"],
+          "additionalProperties": false,
+          "properties": {
+            "path": { "type": "string", "pattern": "^test-design/test-cases/[^/\\\\]+-testcase\\.md$" },
+            "mode": { "type": "string", "enum": ["create", "append", "stage_only"], "description": "create: the file does not exist. append: it exists and is recorded, so new cases are added and nothing else changes. stage_only: validate and stop; the orchestrator replaces the file only after the user agreed." },
+            "expect_sha256": { "type": ["string", "null"] },
+            "adopt_existing": { "type": "boolean" },
+            "module": { "type": ["string", "null"] }
+          }
+        },
+        "traceability_path": { "type": "string", "const": "test-design/state/traceability.json" },
+        "standards_file": { "type": "string", "minLength": 1 },
+        "source_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "input_fingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "confirmed_decisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["question", "answer"],
+            "additionalProperties": false,
+            "properties": { "question": { "type": "string" }, "answer": { "type": "string" }, "declined": { "type": "boolean" } }
+          }
+        }
+      }
+    }
+  }
+}

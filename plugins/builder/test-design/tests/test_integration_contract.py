@@ -20,7 +20,8 @@ DESIGN_COMMANDS = {
     "design-test-n-automation", "design-test-cases", "analyse-stories", "design-tests", "generate-test-cases",
     "design-resume", "design-status", "validate-test-cases", "automation-readiness", "publish-zephyr",
 }
-DESIGN_AGENTS = {"story-analyser", "test-coverage-designer", "test-case-generator", "test-case-quality-checker", "test-design-orchestrator"}
+DESIGN_AGENTS = {"story-analyser", "story-worker", "test-coverage-designer", "test-case-generator", "test-case-quality-checker",
+                 "test-design-orchestrator"}
 DESIGN_SKILLS = {"story-analysis", "story-source-discovery", "test-case-authoring", "test-case-validation", "test-coverage-design",
                  "workflow-resume", "zephyr-publishing"}
 

@@ -117,6 +117,7 @@ cases at all. One command goes the whole way and hands each stage's output to th
 ```
 /builder:design-test-n-automation                 # reads stories/ , asks only what is genuinely yours to decide
 /builder:design-test-n-automation --story US-001,US-003
+/builder:design-test-n-automation --concurrency 5   # story workers at once (default 3, at most 5; 1 = one after another)
 /builder:design-test-n-automation resume          # continues where it stopped (design and automation both)
 ```
 
@@ -124,11 +125,20 @@ cases at all. One command goes the whole way and hands each stage's output to th
 |---|---|---|
 | Story discovery | Finds the Markdown stories (`stories/` is offered first), asks once which stories and which project root. | `test-design/state/` |
 | Story analysis | Each story is analysed on its own, in a fresh worker that sees no other story. Questions a story leaves blocking are asked of you. | `test-design/state/analysis/` |
-| Test design | Chooses techniques (positive, negative, boundary, equivalence, decision table, state transition, end-to-end, non-functional) and the scenarios that cover every acceptance criterion and rule. | `test-design/state/conditions/` |
+| Test design | Chooses techniques (positive, negative, boundary, equivalence, decision table, state transition, end-to-end, non-functional) and the scenarios that cover every acceptance criterion and rule. | `test-design/state/conditions/` (when run as its own stage) |
 | Test-case generation | Writes structured cases with stable IDs, declared test data and observable expected results; every case is validated before it is saved. | `test-design/test-cases/<story>-testcase.md`, `traceability.json` |
 | Automation readiness | A documented rule table judges every case: automatable, automatable with prerequisites (preconditions, `env:` values, dependencies, workflows), **manual** (CAPTCHA, SMS/e-mail codes, hardware, subjective results, elapsed days, load or security tooling), or blocked (the case is incomplete). Manual cases are listed with the reason and are not automated. | printed, and in `dependencies/state/design-handoff.json` |
 | Hand-over | The automatable cases are imported into `dependencies/input/test-cases/design/`. You never point the pipeline at them. | `design-handoff.json` (snapshot in the run) |
 | Scripts, execution, reports | The 13 stages above, unchanged, on those cases. | `dependencies/runs/<run-id>/`, `automation/reports/` |
+
+Discovery, analysis, design and generation run as a **worker pool**: one lightweight orchestrator schedules up to 3 (configurable, at most 5) reusable `story-worker`s at a time,
+a fresh isolated session per story. A worker gets only its own story, the shared rules it needs and small read-only excerpts of stories it depends on, then
+analyses, designs, generates, validates and saves its own `<story>-testcase.md` and returns a compact result. The orchestrator is the only writer of
+`workflow.json`, `traceability.json` and `audit.jsonl`: it ingests each result, re-validates the file, checkpoints it and starts the next story. A failed story
+is retried a bounded number of times and never stops the others; an interrupted run resumes by adopting finished work and rerunning only what is incomplete;
+a story whose source, shared rules or design rules changed is flagged for your decision and never regenerated on its own. Tokens and elapsed time are reported
+separately: parallel workers shorten the wait, they do not reduce total tokens. If the runtime turns out to run the workers one after another, the run says so
+(`check-pool`) and carries on at concurrency 1 instead of pretending.
 
 Every test stays traceable: **Story → Acceptance Criterion → Test Scenario → Test Case → Automation Script → Execution Result**.
 `dependencies/runs/<run-id>/traceability-report.md` shows, per story, each criterion with the cases that cover it and their results,
@@ -140,7 +150,7 @@ stage is run behind your back):
 
 | Command | Stage |
 |---|---|
-| `/builder:design-test-cases [stories path] [--story ids]` | all four design stages, no automation |
+| `/builder:design-test-cases [stories path] [--story ids] [--concurrency n]` | all four design stages, no automation |
 | `/builder:analyse-stories` | story discovery and story analysis |
 | `/builder:design-tests` | test design (needs the analyses) |
 | `/builder:generate-test-cases` | test-case generation (needs the analyses and the design) |
