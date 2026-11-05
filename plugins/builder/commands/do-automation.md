@@ -83,11 +83,15 @@ Follow `playwright-pipeline/SKILL.md` from "Start or resume" (new-run branch) to
   Delegate to agents only where `agents plan` names one; execution, regression and report building are yours, through the CLI.
 - Print `[n/13] <stage> … <status> — <note>` after each stage.
 - A `blocked` or `failed` stage stops the flow: say why, what the user must do, and the exact resume command
-  `/builder:do-automation resume <runId>`. Do not skip a stage or hand-edit anything to get past it.
+  `/builder:do-automation resume <runId>`. Do not skip a stage or hand-edit anything to get past it. Before you stop, run
+  `pl report coverage <runId>` and give the user the page, so they can see which test cases are not automated yet and why.
+- At `report_generation`, complete the stage with `--artifact automationCoverage=automation-coverage.json` as well (`report build` wrote it).
 
 ## Finish
 
-Give the final summary defined at the end of `stages.md` (counts, failure categories, healing, unresolved tests, report and evidence
+Give the final summary defined at the end of `stages.md`, **starting with the automation coverage**: how many test cases were automated and
+how many were not, the reason for each one that was not, and the path `automation/reports/<runId>/automation-coverage/index.html`
+(the page the user opens; every case with a clear reason and the next step). Then the rest (counts, failure categories, healing, unresolved tests, report and evidence
 paths, what was reused, test data left behind, whether anything was left running), and the run directory
 `dependencies/runs/<runId>/`. Never call a run successful unless its status is `completed`, and never present a flaky pass as a
 pass. Close with the next steps: `/builder:run-tests` to re-run, `/builder:heal-tests <runId>` for eligible

@@ -127,9 +127,12 @@ changed:
 - `report_generation`: `pl report build <runId>` also writes `traceability-report.json` and `.md` in the run directory (the chain
   Story → Criterion → Scenario → Case → Script → Result, criteria no case covers, cases without a script or result, cases left manual).
   Complete the stage with `--artifact summary=… --artifact summaryMarkdown=… --artifact traceabilityReport=traceability-report.json
-  --artifact traceabilityMarkdown=traceability-report.md`.
+  --artifact traceabilityMarkdown=traceability-report.md --artifact automationCoverage=automation-coverage.json`. The same `report build`
+  writes the automation coverage page: manual cases withheld at the hand-over appear in it as *not automated* with the readiness rule that
+  caused it, next to the cases that were automated.
 - Print `[n/13] <stage> … <status> — <note>` after each stage. A `blocked` or `failed` stage stops the flow: say why, what the user must
-  do, and the exact command `/builder:design-test-n-automation resume`.
+  do, and the exact command `/builder:design-test-n-automation resume`. Before you stop, run `pl report coverage <runId>` and give the
+  user the page.
 
 `[3/3] automation … done`
 
@@ -137,6 +140,8 @@ changed:
 
 Give the final summary defined at the end of `stages.md` and add, in this order:
 
+0. **Automation coverage** first (see `stages.md`, "Final message"): N of M test cases automated, each not-automated case with its reason, and the page
+   `automation/reports/<runId>/automation-coverage/index.html`.
 1. **Traceability** from `traceability-report.md`: stories and criteria with their state (passed / failing / flaky / incomplete / manual
    only / uncovered), and the gaps listed in the report. Path: `dependencies/runs/<runId>/traceability-report.md`.
 2. **Left for manual execution:** each manual case with its reason (from the hand-over). **Blocked** cases: what to fix and where.

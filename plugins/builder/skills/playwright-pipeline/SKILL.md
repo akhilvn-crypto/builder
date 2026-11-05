@@ -87,5 +87,5 @@ the artifacts to register, and the failure behaviour.
 
 ## Finish
 
-Print the final summary described at the end of stages.md, plus the run directory `dependencies/runs/<runId>/` (summary.md inside) and the report folder `automation/reports/<runId>/`.
-If the run stopped early, give the exact resume command: `/builder:playwright-pipeline resume <runId>`.
+Print the final summary described at the end of stages.md (it starts with the **automation coverage**: which test cases were automated, which were not and why; the page is `automation/reports/<runId>/automation-coverage/index.html`), plus the run directory `dependencies/runs/<runId>/` (summary.md inside) and the report folder `automation/reports/<runId>/`.
+If the run stopped early, first run `node dependencies/engine/cli/pipeline.ts report coverage <runId>` and give the page (cases that never got a script are listed with the stage that stopped the run), then the exact resume command: `/builder:playwright-pipeline resume <runId>`.

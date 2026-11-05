@@ -89,6 +89,8 @@
 //   triage run <runId> | classify <runId> <key> --category C --confidence C --rationale R
 //   heal begin|check|revert|record <runId> <testId> --test-file f [--attempt n] [--rationale R] [--evidence p]...
 //   heal finish <runId>                          report build <runId>
+//   report coverage <runId>                      which test cases are automated and which are not, with the reason for each: automation-coverage.json in the run +
+//                                                reports/<runId>/automation-coverage/index.html ("report build" writes it too; this one works on a run that stopped early)
 //   deps record --dependency <name> --action <action> --reason <text>
 //               [--version <v>] [--cmd <command>] [--run <runId>]
 

@@ -10,7 +10,7 @@
       "name": "builder",
       "source": "./plugins/builder",
       "description": "Agentic test pipeline: user stories in, designed test cases, reviewed + executed + bounded self-healing Playwright tests and traceable reports out (or bring your own test cases).",
-      "version": "0.25.0",
+      "version": "0.26.0",
       "category": "testing",
       "tags": ["playwright", "testing", "qa", "e2e", "test-design"]
     }

@@ -67,6 +67,17 @@ when it finishes; with `sweep` nothing is removed until the pipeline sweeps once
 - Cleanup only happens when the config has `cleanup.mode` `test` or `sweep` and the environment is on `cleanup.allowedEnvironments`
   (never production); otherwise everything created is listed as left behind, with the reason. `pl cleanup data <runId> --dry-run` shows
   what a sweep would do; `pl cleanup status <runId>` the counts.
+**Automation coverage (every run, every command).** `pl report build` also writes `dependencies/runs/<runId>/automation-coverage.json` and the page
+`automation/reports/<runId>/automation-coverage/index.html`: every test case the user brought, **automated** (a script exists and Playwright ran it; the
+result column says passed / failed / flaky / healed) or **not automated** with a reason code, the cause in the record's own words and the next step.
+Reasons: `manual` (readiness rules), `needs_clarification`, `invalid`, `not_in_run`, `not_generated` (the generator's exclusion text), `skipped`,
+`not_run` (runner error), `run_stopped` (names the stage that blocked or failed). It also lists input the parser could not turn into cases at all.
+It is a join of records the pipeline already keeps, so it is the only source for "how many cases were automated": never work the numbers out from
+`summary.json` (which only knows cases that became specs) or from memory. Its reply is the `coverage` block of `report build` (`total`, `automated`,
+`notAutomated`, `automatedPercent`, `byReason`, `html`). When a run **stops before `report_generation`** (a `blocked` or `failed` stage, or the user
+cancelling), run `pl report coverage <runId>` anyway and give the page: the cases that never got a script are exactly what the user will ask about.
+It is derived data and never fails a stage.
+
 Always deterministic, no planning needed: preflight, configuration, input_validation, execution, regression_validation,
 report_generation, finalization. Running tests is a CLI call; a runner error is reported, not "fixed" by an agent.
 
@@ -107,7 +118,7 @@ leftovers of earlier crashed or abandoned runs (only when no pipeline is running
 | 9 | `failure_triage` | execution results (this run or `sourceRunId`) | `pl triage run <runId>`, then `pl agents plan <runId> failure_triage`: Agent **failure-healer** Phase A only for the failures it lists (not high-confidence clear-cut ones) | `failureAnalysis=failure-analysis.json` | no failures → still complete (empty analysis) |
 | 10 | `healing` | failure analysis | no eligible failures → `skipped` ("no eligible script defects"). Else `pl agents plan <runId> healing`, then Agent **failure-healer** Phase B per eligible test, one after another (tests in the same file never in parallel) | `healingLog=healing-log.json` | the healer must run `pl heal finish`. A healed test's cache entry is updated automatically |
 | 11 | `regression_validation` | healing log | nothing healed → `skipped`. Else you, directly: `pl exec run <runId> --label regression --test-file <each healed file>` (no agent) | `regressionResults=regression-results.json` | runner error → `failed` |
-| 12 | `report_generation` | everything above | `pl report build <runId>` (also builds the `extent` and `evidence-pdf` reports when chosen) | `summary=summary.json`, `summaryMarkdown=summary.md`; a `design-test-n-automation` run also `traceabilityReport=traceability-report.json`, `traceabilityMarkdown=traceability-report.md` | exit 2 (reporter failed / runner error) → `failed` with the reporter details; read `reportGeneration` (reporters that did not produce their files) separately from `counts` (test outcomes); the summary files still exist for the user. `evidence-pdf` with status `missing_dependency` (Chromium / `@playwright/test`): ask for approval for that dependency, record it, then run `pl report build` again |
+| 12 | `report_generation` | everything above | `pl report build <runId>` (also builds the `extent` and `evidence-pdf` reports when chosen) | `summary=summary.json`, `summaryMarkdown=summary.md`, `automationCoverage=automation-coverage.json` (optional but always register it: it is validated when present); a `design-test-n-automation` run also `traceabilityReport=traceability-report.json`, `traceabilityMarkdown=traceability-report.md` | exit 2 (reporter failed / runner error) → `failed` with the reporter details; read `reportGeneration` (reporters that did not produce their files) separately from `counts` (test outcomes); the summary files still exist for the user. `evidence-pdf` with status `missing_dependency` (Chromium / `@playwright/test`): ask for approval for that dependency, record it, then run `pl report build` again |
 | 13 | `finalization` | summary | `pl run finalize <runId>` (its `cleanup` block is the final check that nothing of the run is still running) | — | refused until counts are recorded |
 
 ### Credentials
@@ -122,9 +133,14 @@ If `env.keptExisting` is non-empty, mention it: the value already in `.env` is u
 
 Progress line after each stage: `[n/13] <stage> … <status> — <short note>`.
 
-Final message: run id and status (`pl run show <runId>`); the counts table (total / passed / failed /
+Final message: run id and status (`pl run show <runId>`); **the automation coverage first** (below); the counts table (total / passed / failed /
 flaky(recovered) / healed / blocked / skipped / unresolved); failure categories; healing attempts; unresolved tests
 with reasons; paths to `dependencies/runs/<runId>/summary.md`, the HTML report (`automation/reports/<runId>/initial/html/index.html`), the Allure report if any, the Extent report if chosen (`automation/reports/<runId>/extent-report/index.html`), the evidence PDF if chosen (`automation/reports/<runId>/evidence-report/evidence-report.pdf`; also name any evidence gaps its status detail reports), and the evidence folder `automation/test-results/<runId>/`.
+**Automation coverage** (from `report build`'s `coverage` block or `pl report coverage <runId>`): "N of M test cases automated (x%): P passing, F failing/flaky/healed",
+then, for the K that were not automated, one line per reason with its count and the meaning (`REASON_MEANING` in `automation-coverage.ts`, repeated on the page), then each
+not-automated case as `<id> — <reason label>: <the reason's detail>` (at most 15, then "and N more on the page"; the page lists all of them with the next step), and
+`inputProblems` if any. End with the page path `automation/reports/<runId>/automation-coverage/index.html`. A failing script is still an automated case: say that
+it needs attention, not that it is missing. Say nothing about coverage that the report does not contain.
 Add what was reused (`pl cache status <runId>`) and which stages needed no agent (`pl agents show <runId>`).
 Say which test data is still there (`pl run finalize`'s `data` block, or `pl cleanup status <runId>`): how many records were created and removed, and each
 leftover with how it can be deleted; if the run created none, say nothing about it.

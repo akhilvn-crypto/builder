@@ -6,6 +6,7 @@ import path from 'node:path';
 import { readJson, sha256File } from '../utils/fs.ts';
 import { inputBaseDir } from '../utils/layout.ts';
 import { handoffCurrentIssues, validateHandoffDocument, type HandoffDocument } from './design-handoff.ts';
+import { validateAutomationCoverage } from './automation-coverage.ts';
 import { validateCanonicalDocument, checkSpecsAgainstCanonical, isAutomatable, type CanonicalDocument } from './canonical.ts';
 import { validateExecutionResults } from './execution.ts';
 import { validateExplorationRecord } from './exploration.ts';
@@ -101,6 +102,8 @@ const JSON_VALIDATORS: Record<string, Validator> = {
     return issues.length > 0 ? issues : handoffCurrentIssues(ctx.rootDir, v as HandoffDocument);
   },
   traceabilityReport: (v) => validateTraceabilityReport(v),
+  // Optional for every command (not in the required lists): checked whenever it is registered.
+  automationCoverage: (v) => validateAutomationCoverage(v),
 };
 
 export function checkStageOutputs(stage: StageName, ctx: Ctx): string[] {

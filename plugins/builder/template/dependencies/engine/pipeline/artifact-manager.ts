@@ -45,6 +45,7 @@ export const ARTIFACTS = {
   designHandoff: 'design-handoff.json', // snapshot of the test-design handoff this run was created from (design-handoff.ts)
   traceabilityReport: 'traceability-report.json', // story -> criterion -> scenario -> case -> script -> result (traceability-report.ts)
   traceabilityMarkdown: 'traceability-report.md',
+  automationCoverage: 'automation-coverage.json', // every test case: automated or not, with the reason (automation-coverage.ts); the page is reports/<run-id>/automation-coverage/index.html
   metrics: 'metrics.json', // derived from the manifest + artifacts; safe to regenerate
   ledgerPlan: 'ledger-plan.json', // what the test ledger says each test needs this run (a preview; the stages still decide), see test-ledger.ts
   cacheDecisions: 'cache-decisions.json', // every reuse/rebuild decision of this run, with reasons

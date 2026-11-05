@@ -108,6 +108,11 @@ How it works:
   for `extent` it writes the HTML page from the `initial` (and `regression`) results and checks the file is not empty;
   for `evidence-pdf` it builds the PDF from the `initial` (and `regression`) results and checks it is a PDF.
 - Writes `summary.json` and `summary.md` into the run directory (`dependencies/runs/<runId>/`) **even when a reporter failed**, so the failure is visible.
+- Writes the **automation coverage** for every run, whatever reporters were chosen: `automation-coverage.json` in the run directory and the page
+  `automation/reports/<runId>/automation-coverage/index.html` (one self-contained file). Every test case is *automated* (a script exists and
+  Playwright ran it) or *not automated* with a reason code and the cause; see "Automation coverage" in `playwright-pipeline/stages.md`.
+  It is derived data: a failure to write it is reported in the `coverage` block and never fails the report. Register it when completing the
+  stage: `--artifact automationCoverage=automation-coverage.json`. For a run that stopped before this stage, `pl report coverage <runId>` builds it.
 - Exit 2 if any reporter failed or the run had a runner error. Then set `report_generation` to `failed` with the
   reason. Never claim a report exists unless `status: generated`.
 - Keeps report generation apart from test results: `reportGeneration` (`ok`, `failed[]`, duration, files, bytes) answers "could the
@@ -118,7 +123,7 @@ How it works:
 ## Finalization
 `node dependencies/engine/cli/pipeline.ts run finalize <runId>` copies the counts onto the manifest and applies `retention.keepRuns`
 (only when configured). Then complete `finalization`. The final message shows: counts table, failure categories,
-healing attempts and results, unresolved tests with reasons, report paths (`automation/reports/<runId>/initial/html/index.html`,
+healing attempts and results, unresolved tests with reasons, the automation coverage (automated vs not, with reasons; `automation/reports/<runId>/automation-coverage/index.html`), report paths (`automation/reports/<runId>/initial/html/index.html`,
 the Allure report, the Extent report `automation/reports/<runId>/extent-report/index.html`, the evidence PDF `automation/reports/<runId>/evidence-report/evidence-report.pdf`,
 `dependencies/runs/<runId>/summary.md`) and the evidence directory `automation/test-results/<runId>/`.
 

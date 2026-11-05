@@ -48,6 +48,7 @@ import {
 import { attachHandoffToRun, designStatus, handOver, type HandoffDocument } from '../pipeline/design-handoff.ts';
 import { assessReadiness } from '../pipeline/readiness.ts';
 import { buildTraceability, renderTraceabilityMarkdown } from '../pipeline/traceability-report.ts';
+import { buildCoverage, writeCoverageFiles } from '../pipeline/automation-coverage.ts';
 import { listInputFiles, parseInputs } from '../pipeline/test-case-parser.ts';
 import { applyMapping, inspectInput } from '../pipeline/input-inspect.ts';
 import { IMPORT_DIR, cleanSourcePath, importInput } from '../pipeline/input-import.ts';
@@ -55,7 +56,7 @@ import { loadMappings } from '../pipeline/input-table.ts';
 import { validateInput } from '../pipeline/input-validation.ts';
 import { buildBaseline, buildRunMetrics, compareRuns, writeRunMetrics } from '../pipeline/metrics.ts';
 import { planModules, writeNormalizedInput } from '../pipeline/modules.ts';
-import { buildSummary, reportersOk, type RunSummary } from '../pipeline/reporting.ts';
+import { buildSummary, computeFinalTests, reportersOk, type FinalTest, type RunSummary } from '../pipeline/reporting.ts';
 import {
   HealingLimitError, loadManifest, mutateManifest, pruneRuns, recordHealingAttempt, setTestCounts, type RunManifest,
 } from '../pipeline/run-manager.ts';
@@ -336,6 +337,32 @@ function writeTraceability(r: RunCtx): { ok: true; summary: unknown; gaps: strin
   writeJsonAtomic(path.join(r.dir, ARTIFACTS.traceabilityReport), report);
   writeFileSync(path.join(r.dir, ARTIFACTS.traceabilityMarkdown), renderTraceabilityMarkdown(report));
   return { ok: true, summary: report.summary, gaps: report.gaps };
+}
+
+// The automation coverage report: every test case, automated or not, with the reason. Works at any point of a run (a run that stopped
+// early gets one too), from whatever records exist; the page is written next to the other reports. Derived data: it never fails a run.
+function writeCoverage(root: string, r: RunCtx, finalTests: FinalTest[] | null): { ok: true; html: string; json: string; summary: unknown } | { ok: false; issue: string } {
+  try {
+    const execution = artifactWithSource<ExecutionResults>(r, ARTIFACTS.executionResults).value;
+    const specs = artifactWithSource<TestSpecDocument>(r, ARTIFACTS.testSpecs).value;
+    const generation = artifactWithSource<GenerationManifest>(r, ARTIFACTS.generationManifest).value;
+    const config = r.manifest.config;
+    const tests = finalTests ?? (execution ? computeFinalTests({
+      results: execution, analysis: readArtifact<FailureAnalysis>(r.dir, ARTIFACTS.failureAnalysis), healing: readArtifact(r.dir, ARTIFACTS.healingLog),
+      regression: readArtifact<ExecutionResults>(r.dir, ARTIFACTS.regressionResults), specs, generation,
+    }) : null);
+    const report = buildCoverage({
+      manifest: r.manifest,
+      canonical: artifactWithSource<CanonicalDocument>(r, ARTIFACTS.canonicalCases).value,
+      specs, generation, execution, finalTests: tests,
+      handoff: artifactWithSource<HandoffDocument>(r, ARTIFACTS.designHandoff).value,
+      secrets: config ? secretValuesFor(root, config.auth.credentialEnvVars) : [],
+    });
+    const files = writeCoverageFiles(root, r.dir, report);
+    return { ok: true, html: toPosixRelative(root, files.html), json: toPosixRelative(r.dir, files.json), summary: { total: report.summary.total, automated: report.summary.automated, notAutomated: report.summary.notAutomated, automatedPercent: report.summary.automatedPercent, byReason: report.summary.byReason, inputProblems: report.inputProblems.length } };
+  } catch (err) {
+    return { ok: false, issue: (err as Error).message };
+  }
 }
 
 function inputPathOf(r: RunCtx, v: Values): string {
@@ -992,18 +1019,32 @@ export function stageCommand(root: string, group: string, action: string | undef
       // The report is part of the design command's contract; for any other run that carries a design link it is a bonus, never a failure.
       const designRun = r.manifest.command === 'design-test-n-automation';
       const trace = designRun || r.manifest.design || artifactWithSource<HandoffDocument>(r, ARTIFACTS.designHandoff).value ? writeTraceability(r) : null;
+      // Every run also gets the automation coverage page (which test cases were automated, which were not and why). It is derived
+      // from the same files and never makes the report build fail.
+      const coverage = writeCoverage(root, r, summary.tests);
       const good = reportersOk(summary) && !summary.runnerError && (trace === null || trace.ok || !designRun);
       // Report generation and test outcomes are separate questions: a broken reporter says nothing about the tests, and
       // failing tests say nothing about whether the reports could be built.
       const value = {
         ok: good,
-        artifacts: [ARTIFACTS.summary, ARTIFACTS.summaryMarkdown, ...(trace?.ok ? [ARTIFACTS.traceabilityReport, ARTIFACTS.traceabilityMarkdown] : [])],
+        artifacts: [ARTIFACTS.summary, ARTIFACTS.summaryMarkdown, ...(coverage.ok ? [ARTIFACTS.automationCoverage] : []), ...(trace?.ok ? [ARTIFACTS.traceabilityReport, ARTIFACTS.traceabilityMarkdown] : [])],
+        coverage: coverage.ok ? { html: coverage.html, json: coverage.json, ...(coverage.summary as object) } : { error: coverage.issue },
         ...(trace ? { traceability: trace.ok ? { summary: trace.summary, gaps: trace.gaps } : { error: trace.issue } } : {}),
         mode: summary.mode,
         reportGeneration: summary.reportGeneration,
         counts: summary.counts, reporters: summary.reporters, unresolved: summary.unresolved, runnerError: summary.runnerError,
       };
       return { value, code: good ? 0 : 2 };
+    }
+
+    // Automation coverage at any point of a run: which test cases are automated, which are not, and the reason for each. "report build"
+    // writes it too; run this one when a run stopped (blocked, failed) before report_generation, or to refresh it.
+    case 'report coverage': {
+      const r = run(root, rest[0]);
+      const finalSummary = readArtifact<RunSummary>(r.dir, ARTIFACTS.summary);
+      const c = writeCoverage(root, r, finalSummary?.tests ?? null);
+      if (!c.ok) return notReady({ ok: false, issues: [c.issue] });
+      return ok({ ok: true, artifact: ARTIFACTS.automationCoverage, html: c.html, json: c.json, ...(c.summary as object) });
     }
 
     case 'run finalize': {

@@ -244,7 +244,16 @@ test('end to end: a passing test, a healed broken locator, a genuine failure kep
   assert.deepEqual(report.counts, { total: 5, passed: 1, failed: 1, flaky: 1, healed: 1, blocked: 1, skipped: 0, unresolved: 1 });
   assert.deepEqual(report.reporters.map((r: any) => `${r.name}:${r.status}`), ['html:generated', 'json:generated']);
   assert.deepEqual(report.unresolved.map((u: any) => u.key), ['TC-5@-']);
-  stage(root, runId, 'report_generation', 'completed', 'summary=summary.json', 'summaryMarkdown=summary.md');
+  // Automation coverage comes with every report build: 4 cases have a script that ran (one healed, one failing, one flaky), the
+  // fifth was never automatable and says why.
+  assert.equal(report.coverage.html, `reports/${runId}/automation-coverage/index.html`);
+  assert.deepEqual([report.coverage.total, report.coverage.automated, report.coverage.notAutomated], [5, 4, 1]);
+  assert.deepEqual(report.coverage.byReason.needs_clarification, 1);
+  assert.ok(report.artifacts.includes('automation-coverage.json'));
+  const coverage = JSON.parse(readFileSync(path.join(dependenciesDir(root), `runs/${runId}/automation-coverage.json`), 'utf8'));
+  assert.deepEqual(coverage.cases.map((c: any) => `${c.testId}:${c.status}:${c.result ?? c.reason.code}`), ['TC-1:automated:passed', 'TC-2:automated:healed', 'TC-3:automated:failed', 'TC-4:automated:flaky', 'TC-5:not_automated:needs_clarification']);
+  assert.match(readFileSync(path.join(root, report.coverage.html), 'utf8'), /TC-5[\s\S]*Test case needs clarification/);
+  stage(root, runId, 'report_generation', 'completed', 'summary=summary.json', 'summaryMarkdown=summary.md', 'automationCoverage=automation-coverage.json');
 
   stage(root, runId, 'finalization', 'running');
   assert.throws(() => { stage(root, runId, 'finalization', 'completed'); }, /test counts were not recorded/);
