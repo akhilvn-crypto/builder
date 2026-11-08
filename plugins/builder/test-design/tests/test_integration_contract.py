@@ -18,7 +18,7 @@ SKILLS = PLUGIN_ROOT / "skills"
 
 DESIGN_COMMANDS = {"design-test-n-automation", "generate-test-cases", "publish-zephyr"}
 # the plugin's whole user-facing command set: test design, design + automation, and the separate automation flow
-ALL_COMMANDS = DESIGN_COMMANDS | {"do-automation"}
+ALL_COMMANDS = DESIGN_COMMANDS | {"do-automation", "update-execution-result", "build-test-reports"}
 DESIGN_AGENTS = {"story-analyser", "story-worker", "test-coverage-designer", "test-case-generator", "test-case-quality-checker",
                  "test-design-orchestrator"}
 DESIGN_SKILLS = {"story-analysis", "story-source-discovery", "test-case-authoring", "test-case-validation", "test-coverage-design",
@@ -112,8 +112,9 @@ class PublishIsManualOnly(unittest.TestCase):
         for p in plugin_markdown():
             rel = p.relative_to(PLUGIN_ROOT).as_posix()
             text = p.read_text(encoding="utf-8")
-            if rel in ("commands/publish-zephyr.md", "skills/zephyr-publishing/SKILL.md"):
-                continue
+            if rel in ("commands/publish-zephyr.md", "skills/zephyr-publishing/SKILL.md",
+                       "commands/update-execution-result.md", "skills/execution-result-publishing/SKILL.md"):
+                continue  # the publish pair, and the execution-result pair that reads the state the publish command wrote
             if rel in self.ALLOWED:
                 # allowed to name the command only to say it is manual / never part of the workflow
                 for n, line in enumerate(text.splitlines(), 1):
@@ -203,3 +204,103 @@ class SavedConditions(TempProject):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReportBuildIsManualOnly(unittest.TestCase):
+    """`build-test-reports` reads Zephyr and writes the ISO workbooks, so only the user typing it may start it."""
+
+    NEEDLES = ("build-test-reports", "zephyr-reports.py", "test-report-building")
+    ALLOWED = {"commands/build-test-reports.md", "skills/test-report-building/SKILL.md"}
+
+    def test_nothing_else_in_the_plugin_reaches_it(self):
+        for p in plugin_markdown():
+            rel = p.relative_to(PLUGIN_ROOT).as_posix()
+            if rel in self.ALLOWED:
+                continue
+            text = p.read_text(encoding="utf-8")
+            for needle in self.NEEDLES:
+                self.assertNotIn(needle, text, f"{rel} mentions {needle}")
+
+    def test_the_model_cannot_load_the_command_or_skill_by_itself(self):
+        self.assertEqual(frontmatter(COMMANDS / "build-test-reports.md")["disable-model-invocation"], "true")
+        fm = frontmatter(SKILLS / "test-report-building" / "SKILL.md")
+        self.assertEqual((fm["disable-model-invocation"], fm["user-invocable"], fm["name"]), ("true", "false", "test-report-building"))
+
+    def test_no_agent_has_the_skill(self):
+        for p in AGENTS.glob("*.md"):
+            self.assertNotIn("test-report-building", frontmatter(p).get("skills", ""), p.name)
+
+    def test_the_command_is_read_only_and_says_so(self):
+        text = (COMMANDS / "build-test-reports.md").read_text(encoding="utf-8")
+        self.assertIn("Manual invocation only", text)
+        self.assertIn("never run it", text)
+        self.assertIn("It only **reads**", text)
+        self.assertIn("Never delete a file in `Test artifacts ISO/`", text)
+        self.assertIn("Test artifacts ISO", (SKILLS / "test-report-building" / "SKILL.md").read_text(encoding="utf-8"))
+
+    def test_the_command_checks_before_it_reads_and_asks_before_installing(self):
+        text = (COMMANDS / "build-test-reports.md").read_text(encoding="utf-8")
+        a, b = text.index("## Stage A"), text.index("## Stage B")
+        for needle in ("RP preflight", "Jira connector", "OPENPYXL_MISSING", "Never install anything unasked"):
+            self.assertTrue(a < text.index(needle, a) < b, needle)
+        self.assertLess(text.index("RP cycles"), text.index("RP fetch"))
+        self.assertLess(text.index("RP fetch"), text.index("RP build"))
+
+    def test_the_script_only_reads_and_never_runs_tests_or_calls_jira(self):
+        src = (PLUGIN / "scripts" / "zephyr-reports.py").read_text(encoding="utf-8")
+        self.assertNotIn("subprocess", src)
+        self.assertNotIn("atlassian", src.lower())
+        self.assertNotRegex(src, r'http\(cfg, "(POST|PUT|PATCH|DELETE)"')
+
+    def test_the_two_templates_ship_with_the_plugin(self):
+        for name in ("testcases-template.xlsx", "test-report-template.xlsx"):
+            self.assertTrue((PLUGIN / "templates" / name).stat().st_size > 10_000, name)
+
+
+class ExecutionUpdateIsManualOnly(unittest.TestCase):
+    """`update-execution-result` runs tests, writes to Zephyr and creates Jira bugs, so only the user typing it may start it."""
+
+    NEEDLES = ("update-execution-result", "zephyr-execution.py", "execution-result-publishing")
+    ALLOWED = {  # files that may name it, and then only to say it is a separate, manual action
+        "commands/update-execution-result.md", "skills/execution-result-publishing/SKILL.md",
+    }
+
+    def test_nothing_else_in_the_plugin_reaches_it(self):
+        for p in plugin_markdown():
+            rel = p.relative_to(PLUGIN_ROOT).as_posix()
+            if rel in self.ALLOWED:
+                continue
+            text = p.read_text(encoding="utf-8")
+            for needle in self.NEEDLES:
+                self.assertNotIn(needle, text, f"{rel} mentions {needle}")
+
+    def test_the_model_cannot_load_the_command_or_skill_by_itself(self):
+        self.assertEqual(frontmatter(COMMANDS / "update-execution-result.md")["disable-model-invocation"], "true")
+        self.assertEqual(frontmatter(SKILLS / "execution-result-publishing" / "SKILL.md")["disable-model-invocation"], "true")
+        self.assertEqual(frontmatter(SKILLS / "execution-result-publishing" / "SKILL.md")["user-invocable"], "false")
+
+    def test_no_agent_has_the_skill_or_the_jira_tools(self):
+        for p in AGENTS.glob("*.md"):
+            fm = frontmatter(p)
+            self.assertNotIn("execution-result", fm.get("skills", ""), p.name)
+
+    def test_the_command_says_it_is_manual_and_never_edits_tests_or_heals(self):
+        text = (COMMANDS / "update-execution-result.md").read_text(encoding="utf-8")
+        self.assertIn("Manual invocation only", text)
+        self.assertIn("never run it", text)
+        self.assertIn("Phase B never runs in this command", text)
+        self.assertIn("never delete a Zephyr execution", text)
+
+    def test_the_command_covers_every_preflight_check_before_anything_runs(self):
+        text = (COMMANDS / "update-execution-result.md").read_text(encoding="utf-8")
+        a, b = text.index("## Stage A"), text.index("## Stage B")
+        for needle in ("pl preflight", "Jira connector", "ER preflight", "pl exec list", "ER map", "Test Cycle", "ER begin"):
+            self.assertGreater(text.index(needle, a), a, needle)
+            self.assertLess(text.index(needle, a), b, needle)
+
+    def test_the_script_never_runs_tests_or_calls_jira(self):
+        src = (PLUGIN / "scripts" / "zephyr-execution.py").read_text(encoding="utf-8")
+        self.assertNotIn("subprocess", src)
+        self.assertNotIn("atlassian", src.lower())
+        self.assertNotIn("playwright test", src)
+

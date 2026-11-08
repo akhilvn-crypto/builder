@@ -85,7 +85,8 @@
 //   cleanup record <runId> --entity E --identifier I [--hint H]   register a record created outside a test (the explorer does this)
 //   cleanup resolve <runId> <recordId> --status deleted|verified_gone|failed [--note N]   the data-cleaner agent reports a UI deletion
 //   exec plan <runId>                            workers/isolation the next execution would use, and the login-state decision
-//   exec run <runId> [--label L] [--test-file f]... [--test-id id]... [--project p]... [--retries n] [--headed]
+//   exec run <runId> [--label L] [--test-file f]... [--test-id id]... [--tag @t]... [--project p]... [--retries n] [--headed]
+//   exec list [--test-file f]... [--test-id id]... [--tag @t]... [--project p]...   the tests that scope would run (Playwright --list); runs nothing
 //   triage run <runId> | classify <runId> <key> --category C --confidence C --rationale R
 //   heal begin|check|revert|record <runId> <testId> --test-file f [--attempt n] [--rationale R] [--evidence p]...
 //   heal finish <runId>                          report build <runId>
@@ -192,6 +193,7 @@ export function main(argv: string[]): number {
       label: { type: 'string' },
       'test-id': { type: 'string', multiple: true },
       'test-file': { type: 'string', multiple: true },
+      tag: { type: 'string', multiple: true },
       project: { type: 'string', multiple: true },
       retries: { type: 'string' },
       headed: { type: 'boolean' },

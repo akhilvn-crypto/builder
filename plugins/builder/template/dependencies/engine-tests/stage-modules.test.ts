@@ -4,7 +4,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { runDir } from '../engine/pipeline/artifact-manager.ts';
-import { buildPlaywrightArgs, normalizeReport, runPlaywright, type ExecutionResults } from '../engine/pipeline/execution.ts';
+import { buildPlaywrightArgs, listPlaywrightTests, normalizeReport, runPlaywright, type ExecutionResults } from '../engine/pipeline/execution.ts';
 import { checkLocatorExpression, validateExplorationRecord } from '../engine/pipeline/exploration.ts';
 import { buildFailureAnalysis, classifyResult, reclassify } from '../engine/pipeline/failure-classifier.ts';
 import { GENERATED_HEADER, validateGenerationManifest } from '../engine/pipeline/generation.ts';
@@ -188,6 +188,43 @@ test('playwright args escape test IDs for --grep and pass retries', () => {
   assert.deepEqual(buildPlaywrightArgs({ files: ['tests/a.spec.ts'], testIds: ['TC-1', 'TC-2'], retries: 0, projects: ['chromium'] }),
     ['test', 'tests/a.spec.ts', '--grep', '\\[TC-1\\]|\\[TC-2\\]', '--project', 'chromium', '--retries', '0']);
   assert.deepEqual(buildPlaywrightArgs({ headed: true }), ['test', '--headed']);
+});
+
+test('playwright args: a tag scope greps the tag, and tags plus IDs must both match', () => {
+  assert.deepEqual(buildPlaywrightArgs({ tags: ['@smoke'] }), ['test', '--grep', '@smoke']);
+  assert.deepEqual(buildPlaywrightArgs({ tags: ['@a', '@b.c'] }), ['test', '--grep', '@a|@b\\.c']);
+  const both = buildPlaywrightArgs({ testIds: ['TC-1'], tags: ['@smoke'] });
+  assert.equal(both[1], '--grep');
+  const re = new RegExp(both[2]!);
+  assert.ok(re.test('chromium login [TC-1] signs in @smoke'));
+  assert.ok(!re.test('chromium login [TC-1] signs in'));
+  assert.ok(!re.test('chromium login [TC-2] signs in @smoke'));
+});
+
+test('listPlaywrightTests reads the --list JSON: IDs, tags, files, and skips the login setup project', (t) => {
+  const root = tmpRoot(t);
+  writeFile(root, 'node_modules/@playwright/test/cli.js', '// stub');
+  let seen: string[] = [];
+  const spawn = (_cmd: string, args: string[]) => {
+    seen = args;
+    const report = {
+      config: { rootDir: path.join(root, 'tests') },
+      suites: [{ title: 'login.spec.ts', file: 'login.spec.ts', specs: [
+        { title: '[TC-1] signs in', file: 'login.spec.ts', line: 4, tags: ['smoke'], tests: [{ projectName: 'chromium', annotations: [] }] },
+        { title: 'handwritten check', file: 'login.spec.ts', line: 9, tests: [{ projectName: 'chromium', annotations: [] }] },
+        { title: 'log in', file: 'auth.setup.ts', line: 1, tests: [{ projectName: 'setup', annotations: [] }] },
+      ] }],
+    };
+    return { status: 0, stdout: JSON.stringify(report), stderr: '' };
+  };
+  const listing = listPlaywrightTests(root, { files: ['tests/login.spec.ts'], tags: ['@smoke'] }, spawn);
+  assert.equal(listing.ok, true);
+  assert.deepEqual(listing.tests.map((x) => x.testId), ['TC-1', 'untagged:tests/login.spec.ts:handwritten check']);
+  assert.deepEqual(listing.tests[0]!.tags, ['smoke']);
+  assert.ok(seen.includes('--list') && seen.includes('--reporter=json') && seen.includes('--grep'));
+  const bad = listPlaywrightTests(root, {}, () => ({ status: 1, stdout: 'not json', stderr: 'boom' }));
+  assert.equal(bad.ok, false);
+  assert.match(bad.error ?? '', /could not list/);
 });
 
 test('report normalization maps IDs, outcomes, evidence paths and redacts secrets', (t) => {

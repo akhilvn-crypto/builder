@@ -23,7 +23,7 @@ import { buildJobs, judgeSnapshot, snapshotName, type Judgement, type SnapshotRe
 import { resolveExecutionPlan, sessionPlan } from '../pipeline/execution-plan.ts';
 import { ARTIFACTS, runDir } from '../pipeline/artifact-manager.ts';
 import { checkSpecsAgainstCanonical, validateCanonicalDocument, type CanonicalDocument } from '../pipeline/canonical.ts';
-import { resultsPathFor, runPlaywright, saveResults, type ExecutionResults } from '../pipeline/execution.ts';
+import { listPlaywrightTests, resultsPathFor, runPlaywright, saveResults, type ExecutionResults } from '../pipeline/execution.ts';
 import { cleanupAll, cleanupRun, sweepRun } from '../pipeline/process-cleanup.ts';
 import { recordExternally, readCreatedData, summarizeData, updateRecords, type RecordStatus } from '../pipeline/created-data.ts';
 import { readSweepHistory, sweepData, sweepDataSafely } from '../pipeline/data-cleanup.ts';
@@ -85,6 +85,7 @@ export interface Values {
   label?: string;
   'test-id'?: string[];
   'test-file'?: string[];
+  tag?: string[];
   project?: string[];
   retries?: string;
   headed?: boolean;
@@ -813,7 +814,7 @@ export function stageCommand(root: string, group: string, action: string | undef
       const executionPlan = planFor(root, config);
       const options = {
         runId: r.runId, label,
-        files: v['test-file'], testIds: v['test-id'], projects: v.project,
+        files: v['test-file'], testIds: v['test-id'], tags: v.tag, projects: v.project,
         retries: v.retries === undefined ? undefined : Number(v.retries),
         headed: v.headed ? true : undefined,
       };
@@ -837,6 +838,16 @@ export function stageCommand(root: string, group: string, action: string | undef
         runnerLog: results.runnerLog,
       };
       return { value, code: value.ok ? 0 : 2 };
+    }
+
+    // The tests a scope selects, from Playwright's own matching rules. Nothing runs and no run is needed, so a scope can be checked
+    // (and its test IDs read) before anything is executed or published.
+    case 'exec list': {
+      syncFromSavedConfig(root);
+      const listing = listPlaywrightTests(root, { files: v['test-file'], testIds: v['test-id'], tags: v.tag, projects: v.project });
+      const ids = listing.tests.map((t) => t.testId);
+      const duplicates = [...new Set(ids.filter((id, i) => ids.indexOf(id) !== i))];
+      return { value: { ok: listing.ok && listing.tests.length > 0, error: listing.error ?? (listing.tests.length === 0 ? 'the scope selects no tests' : null), total: listing.tests.length, tests: listing.tests, untagged: ids.filter((id) => id.startsWith('untagged:')), ...(duplicates.length ? { duplicateIds: duplicates } : {}) }, code: listing.ok && listing.tests.length > 0 ? 0 : 2 };
     }
 
     // What the next execution would do about workers and saved login state, without running anything.

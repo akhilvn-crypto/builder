@@ -76,6 +76,7 @@ export interface RunOptions {
   label: string;
   files?: string[]; // test files, relative to automation/
   testIds?: string[]; // narrows to titles starting with "[ID]"
+  tags?: string[]; // narrows to tests carrying one of these tags (e.g. "@smoke"); with testIds both must match
   projects?: string[];
   retries?: number; // override, e.g. 0 for healing reruns so a retry can't mask the result
   headed?: boolean; // show the browser window; the run, reports and evidence are the same as headless
@@ -106,9 +107,14 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-export function buildPlaywrightArgs(o: Pick<RunOptions, 'files' | 'testIds' | 'projects' | 'retries' | 'headed'>): string[] {
+export function buildPlaywrightArgs(o: Pick<RunOptions, 'files' | 'testIds' | 'tags' | 'projects' | 'retries' | 'headed'>): string[] {
   const args = ['test', ...(o.files ?? [])];
-  if (o.testIds && o.testIds.length) args.push('--grep', o.testIds.map((id) => escapeRegex(`[${id}]`)).join('|'));
+  const ids = (o.testIds ?? []).map((id) => escapeRegex(`[${id}]`));
+  const tags = (o.tags ?? []).map((t) => escapeRegex(t));
+  // Playwright keeps one --grep: a title/tag test is one pattern. Both given = both must match (lookaheads), not either.
+  if (ids.length && tags.length) args.push('--grep', `^(?=.*(?:${ids.join('|')}))(?=.*(?:${tags.join('|')}))`);
+  else if (ids.length) args.push('--grep', ids.join('|'));
+  else if (tags.length) args.push('--grep', tags.join('|'));
   for (const p of o.projects ?? []) args.push('--project', p);
   if (o.retries !== undefined) args.push('--retries', String(o.retries));
   if (o.headed) args.push('--headed');
@@ -151,6 +157,57 @@ export function runPlaywright(rootDir: string, config: AutomationConfig, o: RunO
     runnerLog: toPosixRelative(rootDir, runnerLogAbs),
     runnerError: results.runnerError ?? (r.status !== 0 && r.status !== 1 ? `unexpected runner exit code ${r.status}` : null),
   };
+}
+
+// ---- listing what a scope would run (no test is executed) ----
+
+export interface ListedTest {
+  testId: string; // the [ID] in the title, else untagged:<file>:<title>
+  title: string;
+  file: string; // relative to automation/
+  line: number;
+  project: string;
+  tags: string[];
+}
+
+export interface TestListing {
+  ok: boolean;
+  error: string | null; // the runner could not list (not installed, config error, invalid JSON)
+  tests: ListedTest[];
+}
+
+// Asks Playwright itself which tests the options select (`test --list`), so a scope is validated with the real matching rules
+// (files, directories, --grep, tags, projects) and nothing is run. The reserved login `setup` project is not a test.
+export function listPlaywrightTests(rootDir: string, o: Pick<RunOptions, 'files' | 'testIds' | 'tags' | 'projects'>, spawn: Spawner = defaultSpawner, env: NodeJS.ProcessEnv = process.env): TestListing {
+  const cli = playwrightCliPath(rootDir);
+  if (!existsSync(cli)) return { ok: false, error: '@playwright/test is not installed in the project', tests: [] };
+  const args = [...buildPlaywrightArgs(o), '--list', '--reporter=json'];
+  const r = spawn(process.execPath, [cli, ...args], { cwd: rootDir, env: { ...env, FORCE_COLOR: '0' }, timeoutMs: 5 * 60_000 });
+  let report: PwReport & { suites?: PwSuite[] };
+  try {
+    report = JSON.parse(r.stdout) as PwReport;
+  } catch {
+    const why = r.error ? r.error.message : `exit code ${r.status}`;
+    return { ok: false, error: `Playwright could not list the tests (${why})${r.stderr ? `: ${r.stderr.replace(ANSI, '').trim().slice(0, 500)}` : ''}`, tests: [] };
+  }
+  const testRoot = report.config?.rootDir ?? path.join(rootDir, 'tests');
+  const rel = (p: string) => toPosixRelative(rootDir, path.isAbsolute(p) ? p : path.join(testRoot, p));
+  const tests: ListedTest[] = [];
+  const walk = (suite: PwSuite, inherited: string | undefined) => {
+    const file = suite.file ?? inherited;
+    for (const spec of suite.specs ?? []) {
+      const specFile = rel(spec.file ?? file ?? 'unknown');
+      for (const t of spec.tests ?? []) {
+        const project = t.projectName || 'default';
+        if (project === SETUP_PROJECT) continue;
+        tests.push({ testId: testIdFor(spec.title, t.annotations, specFile), title: spec.title, file: specFile, line: spec.line ?? 0, project, tags: spec.tags ?? [] });
+      }
+    }
+    for (const child of suite.suites ?? []) walk(child, file);
+  };
+  for (const s of report.suites ?? []) walk(s, undefined);
+  const topErrors = (report.errors ?? []).map((e) => (e.message ?? '').replace(ANSI, '')).filter(Boolean);
+  return { ok: topErrors.length === 0, error: topErrors.length ? `runner errors: ${topErrors.join(' | ').slice(0, 1000)}` : null, tests };
 }
 
 function emptyResults(rootDir: string, o: RunOptions, args: string[], exitCode: number | null, runnerError: string, runnerLogAbs: string, now: Date): ExecutionResults {

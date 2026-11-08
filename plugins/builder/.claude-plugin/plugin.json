@@ -1,7 +1,7 @@
 {
   "name": "builder",
   "displayName": "Builder",
-  "version": "0.26.0",
+  "version": "0.29.0",
   "description": "Agentic test pipeline: detailed user stories to analysed, designed and generated test cases, automation readiness, then reviewed, executed, self-healing Playwright tests with traceability and auditable on-disk run state. Also takes test cases you supply.",
   "author": {
     "name": "Akhil V Nair",
