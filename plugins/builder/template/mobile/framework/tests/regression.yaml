@@ -1,0 +1,5 @@
+# Suite definition (see smoke.yaml). Nightly: broader regression coverage.
+name: regression
+description: The broader regression pack.
+includeTags: [regression]
+excludeTags: [wip]

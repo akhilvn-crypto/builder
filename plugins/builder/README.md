@@ -20,6 +20,12 @@ Install: `/plugin marketplace add akhilvn-crypto/builder` then `/plugin install 
 | `/builder:run-tests [files...] \| resume [<run-id>]` | execute existing tests → triage → report (no edits) |
 | `/builder:heal-tests <run-id> \| resume [<run-id>]` | repair eligible script defects → regression check → report |
 | `/builder:reports [show]` | change which reports are produced (Playwright default report, Allure, Extent, Evidence PDF) after setup: shows what is on, turn reports off or add new ones, saves the choice for the next run; runs no tests, installs only what you approve one by one |
+| `/builder:build-mobile-automation [test-case path] [--platform android\|ios\|both] [--app dir] [--env name]` | **Mobile (Maestro)**, guided end to end (`commands/build-mobile-automation.md`): discovers the Flutter app, checks Maestro/Java/adb/Xcode (asks before installing), scaffolds `mobile-automation/`, turns supplied test cases into Maestro YAML flows with traceability, validates them, proves the framework with a smoke flow on a **real physical device**, ends with per-platform validation status. Separate from Playwright; safe to rerun |
+| `/builder:mobile-init [--update]` | scaffold / refresh the plugin-managed tools of `mobile-automation/` (`scripts/mobile-init.mjs`); installs nothing |
+| `/builder:mobile-generate-flows [path]` | test cases → validated flows, change detection, no execution |
+| `/builder:mobile-run-tests [flow \| --test ID \| --feature name \| --suite smoke\|critical\|regression \| --all]` | run on a device, evidence per flow, failures classified, reports; edits nothing |
+| `/builder:mobile-heal-flows <run-id>` | bounded selector repair proven against the real hierarchy |
+| `/builder:mobile-reports [show]` | optional mobile reports (HTML, JUnit), rebuild, coverage |
 
 Every pipeline command takes `resume` with or without a run id. Bare `resume` continues the newest unfinished
 (`in_progress`, `blocked` or `failed`) run of that command; `node dependencies/engine/cli/pipeline.ts run resumable` lists the
@@ -27,6 +33,8 @@ candidates. Details are in the root README, "Resuming a run".
 
 Claude Code and Claude Cowork: choices use the `AskUserQuestion` dialog and fall back to a numbered chat question when the dialog does
 not appear (`skills/playwright-pipeline/environment.md`, which also lists the Cowork specifics: plugin path lookup, Node, headless, reachability).
+
+Mobile knowledge skills: `maestro-setup` (preflight, installs, devices, physical-device validation), `maestro-framework` (structure, selectors, test-case mapping), `maestro-execution` (runs, evidence, failure categories, repair). Mobile agents: `maestro-flow-generator`, `maestro-flow-healer`.
 
 Knowledge skills (loaded automatically by Claude and the agents): `pipeline-setup`, `test-case-parser`,
 `playwright-framework`, `application-exploration`, `test-data-management`, `execution-and-diagnostics`,
@@ -46,6 +54,21 @@ its unittest suite (`python -m unittest discover -s tests -t tests` from `test-d
 `test-design/scripts/zephyr-reports.py` is the deterministic half of `build-test-reports`: it only issues GET requests to Zephyr Scale (it shares the settings and HTTP layer of the other Zephyr scripts), converts times to IST, and fills copies of `test-design/templates/testcases-template.xlsx` and `test-report-template.xlsx` with openpyxl. It never runs tests and never contacts Jira (the command resolves account and issue IDs through the Jira connector into a lookup file).
 The engine side of the hand-over is `dependencies/engine/pipeline/design-handoff.ts`, `readiness.ts` and `traceability-report.ts` (CLI group `design`:
 `status`, `readiness`, `handoff [--apply]`, `attach`, `trace`).
+
+## Mobile (Maestro) layout
+
+Everything mobile is separate from the Playwright side and is reached only through the `mobile` commands above.
+
+- **Plugin:** `scripts/mobile-init.mjs` (scaffolder, same safety rules as `init.mjs`: never overwrites, `--update` refreshes only `tools/`, refuses `--dir automation|dependencies`),
+  `template/mobile/tools/` (dependency-free Node ESM CLI `maestro-cli.mjs` + `lib/`: `yaml` reader, `config`, `discover`, `preflight` (tools, Maestro capabilities, devices),
+  `testcases`, `traceability`, `flows`, `validate`, `run` + `classify`, `report`, `inspect`, `heal`), `template/mobile/framework/` (user-owned files created once),
+  `template/mobile/CLAUDE.mobile.md` (rules block between `builder-mobile` markers). Tests: `tests/mobile.test.mjs` with fake `maestro`/`adb`.
+- **Project:** `mobile-automation/` (see the root README). The CLI copied into `mobile-automation/tools/` is what the commands and CI run; `--update` refreshes it.
+- **Deterministic vs judgement:** discovery, preflight, parsing, planning, validation, execution bookkeeping, classification rules, reports and the repair guard are code. Agents
+  are used only to write flows from test cases and to confirm/repair selector failures.
+- **Version note:** the CLI was written against Maestro's documented interface; it reads supported flags from the installed CLI's `--help` and records them in `state/setup.json`.
+  Variables in `appId` and the `MAESTRO_*` environment pass-through are the two Maestro behaviours confirmed by the first smoke run on a device; `flows.appIdMode` and
+  `secrets.passing` in the config switch to the alternatives if a version differs.
 
 ## How it fits together
 

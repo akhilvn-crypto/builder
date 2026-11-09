@@ -1,0 +1,8 @@
+# Reusable subflow: start the app from a clean state so a test never depends on what an earlier test left behind.
+# Run it from a test flow with:   - runFlow: ../common/launch-app.yaml
+# This file is yours; the pipeline creates it once and never overwrites it.
+appId: ${APP_ID}
+---
+- launchApp:
+    clearState: true
+    stopApp: true

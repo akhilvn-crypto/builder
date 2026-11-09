@@ -1,0 +1,7 @@
+# Suite definition read by maestro-cli.mjs (this is not a Maestro flow).
+# A flow belongs to the suite when it has one of includeTags and none of excludeTags.
+# Use it:  node mobile-automation/tools/maestro-cli.mjs run --suite smoke --platform android
+name: smoke
+description: Focused flows for pull-request / build validation. Fast, business-critical happy paths only.
+includeTags: [smoke]
+excludeTags: [wip]

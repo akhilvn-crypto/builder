@@ -1,0 +1,18 @@
+# EXAMPLE ONLY — not a real test and not under flows/, so it is never run.
+# Selector ids are made up. Real flows are generated from your test cases and the ids your app exposes.
+appId: ${APP_ID}
+name: "[TC-EXAMPLE] Invalid password shows an error"
+tags: [regression, authentication]
+---
+- runFlow: ../../flows/common/launch-app.yaml
+- tapOn:
+    id: login_email_field
+- inputText: ${MAESTRO_TEST_USER_EMAIL}
+- tapOn:
+    id: login_password_field
+- inputText: wrong-pass-1          # a deliberately fake value from the test case (literal:wrong-pass-1)
+- tapOn:
+    id: login_submit_button
+- assertVisible:
+    id: login_error_message
+- assertVisible: "Invalid email or password"

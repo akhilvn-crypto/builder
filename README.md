@@ -6,6 +6,10 @@ the tests, runs them, repairs broken *scripts* within strict limits, and produce
 
 Nothing is installed without your explicit yes, and secrets never leave `.env`.
 
+**Mobile too.** For a Flutter app, `/builder:build-mobile-automation` builds a separate [Maestro](https://maestro.dev) framework in
+`mobile-automation/` from the same kind of test cases and proves it with a smoke flow on a real phone (see
+[Mobile automation with Maestro](#mobile-automation-with-maestro-builderbuild-mobile-automation)). It never touches the Playwright folders.
+
 Start from test cases you already have, **or from detailed user stories**: `/builder:design-test-n-automation` designs the
 test cases from your stories first and carries them through to executed, traceable Playwright tests (see
 [From user stories to executed tests](#from-user-stories-to-executed-tests-builderdesign-test-n-automation)).
@@ -273,6 +277,12 @@ wrong password) out of `.env`.
 | `/builder:run-tests [files...]` | Execute existing tests, triage failures, report. Edits nothing. |
 | `/builder:heal-tests <run-id>` | Repair eligible script defects from an earlier run, re-validate, report. |
 | `/builder:reports [show]` | Change which reports are produced (Playwright default report, Allure, Extent, Evidence PDF) at any time: shows what is on, lets you turn reports off or add new ones, saves it. Applies from the next run; runs no tests. |
+| `/builder:build-mobile-automation [test-case path] [--platform android\|ios\|both] [--app dir] [--env name]` | Guided end to end for a Flutter app with **Maestro**: discovers the project, checks Maestro/Java/Android/iOS tooling (asks before installing anything), scaffolds `mobile-automation/`, turns test cases into Maestro YAML flows with traceability, validates them and runs a smoke flow on a **real physical device**. Safe to rerun. |
+| `/builder:mobile-init [--update]` | Scaffold (or refresh the plugin-managed tools of) `mobile-automation/`. Installs nothing, touches no device. |
+| `/builder:mobile-generate-flows [path]` | Test cases to validated Maestro flows; detects changed cases, never overwrites hand-edited flows. No execution. |
+| `/builder:mobile-run-tests [flow \| --test ID \| --feature name \| --suite smoke\|critical\|regression \| --all]` | Run flows on a device, keep evidence per flow, classify failures (application / automation / device / environment), build reports. Edits nothing. |
+| `/builder:mobile-heal-flows <run-id>` | Repair selector drift (same control, new id/label) proven against the real screen; bounded, audited, auto-reverted. |
+| `/builder:mobile-reports [show]` | Show or change the optional mobile reports (HTML, JUnit), rebuild a run's reports, show test-case coverage. |
 
 **Claude Code and Claude Cowork.** Choices are shown as a dialog (`AskUserQuestion`). Where that dialog does not appear, as can
 happen in Cowork, Claude asks the same question as a numbered list in chat and waits for your reply; it never picks for you.
@@ -286,6 +296,45 @@ continues the newest unfinished run of that command, skips completed stages, and
 
 **Day-to-day, outside Claude** (from `automation/`): `npm test` runs the tests as a recorded run with reports and evidence;
 `npm run test:adhoc` is plain Playwright with nothing recorded, for debugging.
+
+## Mobile automation with Maestro (`/builder:build-mobile-automation`)
+
+A second, independent framework for the Flutter app: Maestro YAML flows in `mobile-automation/`, generated from the same canonical test
+cases (Markdown from test design, or CSV), run through the Maestro CLI on real devices. It shares the conventions of the Playwright side
+(simple structure, independent tests, stable selectors, deterministic runs, no installs without a yes, secrets in a git-ignored `.env`) and
+**never reads or changes `automation/` or `dependencies/`**.
+
+`/builder:build-mobile-automation` runs eight steps and stops only for your choices, install/device approvals, missing secret values and blockers:
+discovery and prerequisites → scaffold and configuration → test cases (change detection) → physical device → flows (one representative flow first) →
+validation → smoke on the device → CI readiness and summary. It is safe to run again.
+
+- **Prerequisites** (Maestro, Java 17+, Android `adb`, Xcode on a Mac, optionally Flutter) are detected with versions; what the installed Maestro CLI supports is read from its own
+  `--help`. Anything missing is explained and asked for **one at a time**; nothing is installed or changed on your machine or phone unasked.
+- **Selectors** come from Flutter accessibility ids (`Semantics(identifier: …)`), the real screen (`maestro hierarchy`) or text the test case quotes. `Key` values are not
+  accessibility ids. A control with no stable id becomes an entry in `mobile-automation/docs/semantics-requests.md` for the app team, not a hidden fragile selector. Coordinates
+  and `index` need a written reason.
+- **Traceability**: every flow carries `# testCase: <ID>`; `state/traceability.json` records the test case's and the flow's hashes, so a changed case is found and a hand-edited flow is
+  never overwritten. Manual and unclear cases are listed with the reason, not guessed. `report coverage` shows N of M test cases have a flow.
+- **Physical-device validation**: the framework counts as validated for a platform only when a `smoke` flow passed on a real phone (`validation status`). Emulator/simulator runs are
+  labelled as such. iOS needs a Mac, Xcode, trust, Developer Mode and a signed build; on another host it is reported as blocked, never as done.
+- **Runs** execute flow by flow: one failure never stops or erases the others. Each run records platform and OS, device, app id/version, environment, scope, Maestro version and outcome,
+  and keeps a log, screenshots and the screen hierarchy per flow. Failures are classified as **application**, **automation**, **device** or **environment**; uncertain readings say so.
+- **Repair** is limited to an id/text/label that moved on the same control, proven in the real hierarchy, two attempts per flow, reverted automatically if anything else changed.
+- **Reports**: `summary.md`, `summary.json`, `coverage.json` always; `report.html` and `junit.xml` by choice (`/builder:mobile-reports`). CI uses the same CLI
+  (`mobile-automation/README.md`: smoke on pull request, critical after deployment, regression nightly, `--strict` for a failing exit code).
+
+```
+mobile-automation/
+  tools/          plugin-managed CLI (node mobile-automation/tools/maestro-cli.mjs help)
+  config/         mobile.config.json (no secrets), environments/<env>.json
+  flows/common/   reusable subflows (launch-app, …)        flows/<feature>/   one flow per test case
+  tests/          smoke.yaml, critical.yaml, regression.yaml (suite definitions)
+  test-data/  docs/  state/          reports/<runId>/  artifacts/<runId>/<flow>/   (reports and artifacts are git-ignored)
+  .env (git-ignored)  .env.example  README.md
+```
+
+Plugin side: `scripts/mobile-init.mjs`, `template/mobile/` (tools, framework files, rules block), `skills/maestro-*` and `skills/mobile-*`, `agents/maestro-flow-generator.md`
+and `agents/maestro-flow-healer.md`. Tests: `node --test plugins/builder/tests/mobile.test.mjs` (fake `maestro`/`adb`; no phone needed).
 
 ## Reports
 

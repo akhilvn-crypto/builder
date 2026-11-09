@@ -9,10 +9,10 @@
     {
       "name": "builder",
       "source": "./plugins/builder",
-      "description": "Agentic test pipeline: user stories in, designed test cases, reviewed + executed + bounded self-healing Playwright tests and traceable reports out (or bring your own test cases).",
-      "version": "0.29.0",
+      "description": "Agentic test pipeline: user stories in, designed test cases, reviewed + executed + bounded self-healing Playwright tests and traceable reports out (or bring your own test cases). Also Maestro mobile automation for Flutter apps.",
+      "version": "0.30.0",
       "category": "testing",
-      "tags": ["playwright", "testing", "qa", "e2e", "test-design"]
+      "tags": ["playwright", "testing", "qa", "e2e", "test-design", "maestro", "mobile"]
     }
   ]
 }

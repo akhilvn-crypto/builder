@@ -1,0 +1,10 @@
+# secrets and per-machine state
+.env
+reports/
+artifacts/
+state/setup.json
+state/device-validation.json
+state/test-specs.json
+state/identifiers.json
+state/heal/
+*.tmp

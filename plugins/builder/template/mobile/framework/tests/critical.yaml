@@ -1,0 +1,5 @@
+# Suite definition (see smoke.yaml). Post-deployment: business-critical and high-risk journeys.
+name: critical
+description: Flows for critical and high priority journeys, run after a deployment.
+includeTags: [critical, high]
+excludeTags: [wip]

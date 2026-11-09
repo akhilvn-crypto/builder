@@ -1,12 +1,12 @@
 {
   "name": "builder",
   "displayName": "Builder",
-  "version": "0.29.0",
-  "description": "Agentic test pipeline: detailed user stories to analysed, designed and generated test cases, automation readiness, then reviewed, executed, self-healing Playwright tests with traceability and auditable on-disk run state. Also takes test cases you supply.",
+  "version": "0.30.0",
+  "description": "Agentic test pipeline: detailed user stories to analysed, designed and generated test cases, automation readiness, then reviewed, executed, self-healing Playwright tests with traceability and auditable on-disk run state. Also takes test cases you supply. Plus a separate Maestro mobile framework for Flutter apps: flows generated from test cases, validated on real devices.",
   "author": {
     "name": "Akhil V Nair",
     "email": "akhilvnair1999@gmail.com"
   },
   "license": "MIT",
-  "keywords": ["playwright", "testing", "test-automation", "e2e", "qa", "test-generation", "self-healing", "test-design", "user-stories", "traceability"]
+  "keywords": ["playwright", "testing", "test-automation", "e2e", "qa", "test-generation", "self-healing", "test-design", "user-stories", "traceability", "maestro", "mobile", "flutter"]
 }
