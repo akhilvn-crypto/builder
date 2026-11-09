@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Publish Playwright execution results to Zephyr Scale (Cloud, REST API v2) and keep Jira bugs and their links recoverable.
+"""Publish execution results to Zephyr Scale (Cloud, REST API v2) and keep Jira bugs and their links recoverable.
 
-Used only by ``/builder:update-execution-result``. It never runs tests, never edits test code or test cases, never deletes or
+Used only by ``/builder:update-execution-result`` (Playwright, the default surface) and ``/builder:mobile-update-execution-result``
+(Maestro flows on a phone: pass ``--surface mobile`` to every subcommand; the state then lives in ``mobile-automation/`` and ``capture``
+reads a mobile run with ``--run-id`` instead of a pipeline run). It never runs tests, never edits test code or test cases, never deletes or
 overwrites a remote record, and never prints or stores the API token. Jira is *not* contacted here: the command uses the existing
 Jira connector to create the bug, then reports the key and numeric issue ID to ``bug-record``; this script links that bug to the
 Zephyr test case. Zephyr connection settings, the HTTP layer and the case<->bug link call are shared with ``zephyr-publish.py``.
@@ -11,7 +13,7 @@ Zephyr test case. Zephyr connection settings, the HTTP layer and the case<->bug 
     zephyr-execution.py map         --root R --project KEY (--scope-file F | --tests A,B) [--set TC-1=PROJ-T101]
     zephyr-execution.py begin       --root R --project KEY (--cycle KEY | --new-cycle NAME) --scope-file F --scope-text TEXT
                                     [--only-mapped] [--status-* NAME ...]
-    zephyr-execution.py capture     --root R --pipeline-run RUN_ID
+    zephyr-execution.py capture     --root R --pipeline-run RUN_ID            (mobile: --surface mobile --run-id RUN_ID [--allow-emulator])
     zephyr-execution.py classify    --root R --test KEY --category C --confidence H|M|L --rationale TEXT [--by user]
     zephyr-execution.py narrate     --root R --test KEY|ID [--actual TEXT] [--summary TEXT]
     zephyr-execution.py publish     --root R
@@ -22,9 +24,9 @@ Zephyr test case. Zephyr connection settings, the HTTP layer and the case<->bug 
     zephyr-execution.py status|report --root R [--write]
     zephyr-execution.py abandon     --root R --reason TEXT
 
-``--root`` is the project folder (it holds automation/, dependencies/ and test-design/).
+``--root`` is the project folder (it holds automation/, dependencies/ and test-design/; mobile-automation/ for the mobile surface).
 
-Local state (``<root>/automation/execution-results/``): ``execution-run.json`` is the current update run (what was run, what is
+Local state (``<root>/automation/execution-results/``, mobile: ``<root>/mobile-automation/execution-results/``): ``execution-run.json`` is the current update run (what was run, what is
 published, which bug exists, which link is done); ``execution-history.jsonl`` is an append-only event log; a finished or
 abandoned run is moved to ``archive/<id>.json``, never overwritten. Every remote write is recorded *before* the request, so a lost
 reply is detected and never repeated blindly.
@@ -66,6 +68,13 @@ def _load_publisher():
 
 zp = _load_publisher()
 
+# The two places results can come from. Everything after `capture` (publishing, bugs, links, resolve, report) is shared.
+SURFACES = {
+    "playwright": {"dir": "automation", "runner": "Playwright", "column": "Browser"},
+    "mobile": {"dir": "mobile-automation", "runner": "Maestro", "column": "Device"},
+}
+SURFACE = "playwright"  # set once by main() from --surface; zephyr-reports.py imports this module and keeps the default
+
 RESULTS_DIRNAME = "execution-results"
 RUN_NAME = "execution-run.json"
 HISTORY_NAME = "execution-history.jsonl"
@@ -73,7 +82,7 @@ MAPPING_NAME = "test-mapping.json"
 RUN_VERSION = 1
 EVIDENCE_MAX_BYTES = 10 * 1024 * 1024
 DEFAULT_STATUSES = {"pass": "Pass", "fail": "Fail"}  # only a trustworthy verdict reaches Zephyr; everything else is withheld (see decide)
-BROWSER_NAMES = {"chromium": "Chromium", "firefox": "Firefox", "webkit": "WebKit"}
+BROWSER_NAMES = {"chromium": "Chromium", "firefox": "Firefox", "webkit": "WebKit", "android": "Android", "ios": "iOS"}
 CASE_KEY = re.compile(r"^[A-Za-z][A-Za-z0-9_]*-T\d+$")
 CYCLE_KEY = re.compile(r"^[A-Za-z][A-Za-z0-9_]*-R\d+$")
 # Failure classes the engine's triage can name (failure-classifier.ts) -> the label this tool reports.
@@ -92,8 +101,23 @@ class ExecError(Exception):
 
 # --------------------------------------------------------------------------- local state
 
+def app_dir(root: Path) -> Path:
+    """The framework folder results and evidence live in: automation/ (Playwright) or mobile-automation/ (Maestro)."""
+    return Path(root).resolve() / SURFACES[SURFACE]["dir"]
+
+
 def results_dir(root: Path) -> Path:
-    return Path(root).resolve() / "automation" / RESULTS_DIRNAME
+    return app_dir(root) / RESULTS_DIRNAME
+
+
+def runner(rec: dict) -> dict:
+    """What the test runner said about this result (outcome, attempts, duration). Playwright records keep it under "playwright"."""
+    return rec.get("runner") or rec.get("playwright") or {}
+
+
+def source_run(run: dict) -> Optional[str]:
+    """The run the results were read from: a pipeline run (Playwright) or a mobile run."""
+    return run.get("mobileRunId") or run.get("pipelineRunId")
 
 
 def _confined(root: Path, p: Path) -> Path:
@@ -294,8 +318,8 @@ def _withheld(label: str, reason: str, needs_investigation: bool = False) -> dic
     return {"label": label, "zephyrStatus": None, "publish": False, "bugEligible": False, "needsInvestigation": needs_investigation, "reason": reason}
 
 
-def decide(outcome: str, failure: Optional[dict], blocked_by: Optional[list[str]], statuses: dict) -> dict:
-    """Playwright result + the failure analysis -> label, Zephyr status, reason, bug eligibility.
+def decide(outcome: str, failure: Optional[dict], blocked_by: Optional[list[str]], statuses: dict, note: Optional[str] = None) -> dict:
+    """Runner result + the failure analysis -> label, Zephyr status, reason, bug eligibility. ``note`` is the runner's own reason for a skip.
 
     Only two kinds of result are sent to Zephyr: a pass, and a failure confirmed as an application defect (that one also gets a bug).
     Flaky runs, script / test-data / login problems, environment problems, skips and failures nobody has classified yet say nothing
@@ -304,7 +328,8 @@ def decide(outcome: str, failure: Optional[dict], blocked_by: Optional[list[str]
     if outcome == "passed":
         return {"label": "passed", "zephyrStatus": statuses["pass"], "publish": True, "reason": None, "bugEligible": False, "needsInvestigation": False}
     if outcome == "skipped":
-        why = f"Skipped because a test it depends on did not pass: {', '.join(blocked_by)}" if blocked_by else "Skipped by Playwright"
+        why = (f"Skipped because a test it depends on did not pass: {', '.join(blocked_by)}" if blocked_by
+               else (note.rstrip(".") if note else f"Skipped by {SURFACES[SURFACE]['runner']}"))
         return _withheld("skipped", why + ". It did not run, so there is no result to record.")
     if outcome == "flaky":
         return _withheld("flaky", "Failed first and passed only on retry. An unstable run says nothing reliable about the application, so it is not recorded in Zephyr.")
@@ -334,7 +359,9 @@ def decide(outcome: str, failure: Optional[dict], blocked_by: Optional[list[str]
 # --------------------------------------------------------------------------- plain-words text
 
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
-ROBOTIC = re.compile(r"expect\(|Call log:|Locator:|getBy[A-Z]\w*\(|page\.locator|\n\s+at .+:\d+:\d+|\bwaitFor|\x1b\[|TimeoutError|AssertionError|\bab-er-")
+ROBOTIC = re.compile(r"expect\(|Call log:|Locator:|getBy[A-Z]\w*\(|page\.locator|\n\s+at .+:\d+:\d+|\bwaitFor|\x1b\[|TimeoutError|AssertionError|\bab-er-"
+                     r"|(?i:\bmaestro\b|\b(?:tapOn|assertVisible|assertNotVisible|inputText|runFlow|launchApp|extendedWaitUntil)\b|\.ya?ml\b"
+                     r"|Assertion is false|Element not found|StatusRuntimeException)")
 
 
 def strip_id(title: str) -> str:
@@ -370,6 +397,37 @@ def plain_error(message: Optional[str]) -> str:
     return _clip(first or text.splitlines()[0].strip(), 300)
 
 
+def _quoted(text: str) -> str:
+    m = re.search(r"[\"“'‘]([^\"”'’]{1,120})[\"”'’]", text or "")
+    return m.group(1).strip() if m else ""
+
+
+def plain_error_mobile(err: Optional[dict]) -> str:
+    """A failed Maestro flow in plain words, used only when nobody wrote the actual result by hand. It rephrases what the run recorded
+    (the failed step, Maestro's message, the category) and says nothing it does not know. Maestro's wording is unverified against a
+    real device, so every rule is a loose pattern and the fallback is the run's own plain-language reason."""
+    if not err:
+        return ""
+    cmd = ANSI.sub("", " ".join(x for x in (err.get("command"), err.get("commandMessage")) if x))
+    name = (err.get("commandName") or "").lower()
+    text = cmd + "\n" + ANSI.sub("", err.get("message") or "")
+    if re.search(r"crash|stopped responding|\bANR\b|not responding", text, re.I) or err.get("category") == "application" and re.search(r"crash", err.get("reason") or "", re.I):
+        return "The app crashed or stopped responding."
+    q = _quoted(cmd) or _quoted(text)
+    if name == "assert" or re.search(r"assert", cmd, re.I) or re.search(r"Assertion is false", text, re.I):
+        return f"Expected \"{q}\" to be shown on the screen, but it was not." if q else "Something the test expects to be on the screen was not shown."
+    if re.search(r"element not found|unable to find|could not find|no visible element", text, re.I):
+        return f"The \"{q}\" control could not be found on the screen." if q else "A control the test needed could not be found on the screen."
+    if err.get("timedOut") or re.search(r"time limit|timed out", err.get("reason") or "", re.I):
+        return "The app did not reach the expected screen in time."
+    return _clip(err.get("reason") or "", 300) if err.get("category") == "application" else ""
+
+
+def rec_plain_error(rec: dict) -> str:
+    err = rec.get("error") or {}
+    return plain_error_mobile(err) if SURFACE == "mobile" else plain_error(err.get("message"))
+
+
 def check_narrative(text: str) -> str:
     t = (text or "").strip()
     if len(t) < 8:
@@ -397,7 +455,7 @@ def _evidence(root: Path, t: dict, nonpass: bool) -> list[dict]:
             if not p or p in seen or name not in ("screenshot", "video", "trace"):
                 continue
             seen.add(p)
-            candidate = Path(root).resolve() / "automation" / p
+            candidate = app_dir(root) / p
             abs_path = _confined(root, candidate) if candidate.is_file() else None
             item = {"path": p, "name": name, "contentType": att.get("contentType", "application/octet-stream"), "state": "pending", "note": None}
             if abs_path is None:
@@ -467,7 +525,15 @@ def capture(root: Path, run: dict, pipeline_run: str) -> dict:
         }
         run["tests"][key] = rec
         refreshed += 1
-    # one bug per failing test case (a failure in several browsers is still one defect)
+    _sync_bugs(run)
+    run["captured"] = True
+    run["capturedAt"] = td.utc_now()
+    return {"tests": len(results["tests"]), "refreshed": refreshed, "runnerError": results.get("runnerError"),
+            "unmapped": sorted(r["testId"] for r in run["tests"].values() if r["execution"]["state"] == "unmapped")}
+
+
+def _sync_bugs(run: dict) -> None:
+    # one bug per failing test case (a failure on several browsers / platforms is still one defect)
     for rec in run["tests"].values():
         if rec["bugEligible"] and rec["testId"] not in run["bugs"]:
             run["bugs"][rec["testId"]] = {"testId": rec["testId"], "zephyrKey": rec["zephyrKey"], "state": "pending", "key": None, "issueId": None,
@@ -477,10 +543,145 @@ def capture(root: Path, run: dict, pipeline_run: str) -> dict:
         del run["bugs"][tid]  # reclassified since: no confirmed defect any more
     for bug in run["bugs"].values():
         bug["resultKeys"] = sorted(k for k, r in run["tests"].items() if r["testId"] == bug["testId"] and r["bugEligible"])
+
+
+# --------------------------------------------------------------------------- reading a mobile (Maestro) run
+
+# The mobile CLI's failure categories (classify.mjs) -> the categories the decision above understands.
+MOBILE_CATEGORIES = {"application": "application_defect", "automation": "script_defect", "device": "environment_issue",
+                     "environment": "environment_issue", "unclassified": "inconclusive"}
+MOBILE_EVIDENCE_MAX = {"screenshot": 3, "video": 1}
+
+
+def _mobile_specs(fw: Path) -> dict:
+    """The parsed test cases (state/test-specs.json) in the shape the report and the bug text use."""
+    doc = read_json_file(fw / "state" / "test-specs.json", "parsed test cases", required=False) or {}
+    out = {}
+    for c in doc.get("cases", []) if isinstance(doc, dict) else []:
+        if isinstance(c, dict) and c.get("id"):
+            out[c["id"]] = {"title": c.get("title"), "priority": c.get("priority"), "preconditions": c.get("preconditions") or [],
+                            "steps": [{"index": st.get("n"), "action": st.get("text", ""), "expected": st.get("expected")} for st in c.get("steps") or [] if isinstance(st, dict)],
+                            "expectedResults": c.get("expected") or []}
+    return out
+
+
+def _evidence_mobile(root: Path, r: dict, nonpass: bool) -> list[dict]:
+    """Screenshots and a screen recording of one flow (paths relative to mobile-automation/). Logs and Maestro's debug files stay on disk."""
+    cands: dict[str, list[str]] = {"screenshot": [], "video": []}
+    for path in r.get("artifacts") or []:
+        low = path.lower()
+        if re.search(r"\.(png|jpe?g)$", low):
+            cands["screenshot"].append(path)
+        elif re.search(r"\.(mp4|webm)$", low) and nonpass:
+            cands["video"].append(path)
+    out = []
+    for kind, paths in cands.items():
+        paths.sort(key=lambda x: (0 if re.search(r"fail|error|❌", x, re.I) else 1, x))  # the failure screen first
+        for path in paths[: MOBILE_EVIDENCE_MAX[kind]]:
+            candidate = app_dir(root) / path
+            abs_path = _confined(root, candidate) if candidate.is_file() else None
+            item = {"path": path, "name": kind, "contentType": mimetypes.guess_type(path)[0] or "application/octet-stream", "state": "pending", "note": None}
+            if abs_path is None:
+                item.update(state="missing", note="File not found on disk")
+            elif abs_path.stat().st_size > EVIDENCE_MAX_BYTES:
+                item.update(state="skipped", note=f"Larger than {EVIDENCE_MAX_BYTES // (1024 * 1024)} MB; kept locally")
+            else:
+                item["bytes"] = abs_path.stat().st_size
+            out.append(item)
+    return out
+
+
+def _device_name(device: dict) -> str:
+    model = (device.get("model") or device.get("id") or "the device").strip()
+    maker = (device.get("manufacturer") or "").strip()
+    return model if not maker or model.lower().startswith(maker.lower()) else f"{maker} {model}"
+
+
+def capture_mobile(root: Path, run: dict, run_id: str, allow_emulator: bool = False) -> dict:
+    """Read a finished mobile run (mobile-automation/reports/<runId>/run.json + results.json) into the update run."""
+    fw = app_dir(root)
+    rdir = fw / "reports" / run_id
+    if not rdir.is_dir():
+        raise ExecError("MOBILE_RUN_MISSING", f"Mobile run {run_id} not found at {rdir}. `report list` in the mobile CLI shows the runs.", td.EXIT_MISSING)
+    meta = read_json_file(rdir / "run.json", "run record")
+    results = read_json_file(rdir / "results.json", "run results", required=False)
+    if meta.get("status") == "running":
+        raise ExecError("RUN_NOT_FINISHED", f"Mobile run {run_id} is still marked as running (it was interrupted or is in progress). Run the flows again.")
+    if not isinstance(results, list) or not any(r.get("status") in ("passed", "failed") for r in results):
+        raise ExecError("NOTHING_EXECUTED", "The mobile run executed no flow, so there is nothing to record. Nothing was captured or published.")
+    specs = _mobile_specs(fw)
+    device, app = meta.get("device") or {}, meta.get("app") or {}
+    platform_ = meta.get("platform") or "android"
+    physical = bool(device.get("physical"))
+    seen, test_ids = {}, []
+    for r in results:
+        tid = r.get("testCase") or f"untagged:{r.get('flow')}"
+        key = f"{tid}@{platform_}"
+        if key in seen:
+            raise ExecError("DUPLICATE_TEST_ID", f"Two flows carry test case {tid} in this run ({seen[key]} and {r.get('flow')}). One flow per test case, please: fix the "
+                            "`# testCase:` header of one of them and run again.")
+        seen[key] = r.get("flow")
+        test_ids.append(tid)
+    mapping = build_mapping(root, run["project"]["key"], test_ids)
+    problems = {p["testId"]: p for p in mapping["problems"]}
+    version = " ".join(x for x in (app.get("versionName"), f"(build {app['versionCode']})" if app.get("versionCode") else "") if x) or None
+    os_name = {"android": "Android", "ios": "iOS"}.get(platform_, platform_)
+    run["mobileRunId"], run["pipelineRunId"] = run_id, None
+    run["pipelineLabel"], run["executedAt"] = None, meta.get("finishedAt") or meta.get("startedAt")
+    run["environment"] = {"os": f"{os_name} {device['osVersion']}".strip() if device.get("osVersion") else os_name, "browsers": [platform_],
+                          "baseUrl": None, "applicationEnvironment": meta.get("environment"), "buildVersion": version,
+                          "device": _device_name(device), "physical": physical, "deviceKind": device.get("kind"), "appId": app.get("id"),
+                          "maestroVersion": (meta.get("maestro") or {}).get("version"), "platform": platform_, "allowEmulator": bool(allow_emulator)}
+    refreshed = 0
+    for r in results:
+        tid = r.get("testCase") or f"untagged:{r.get('flow')}"
+        key = f"{tid}@{platform_}"
+        existing = run["tests"].get(key)
+        if existing and existing["execution"]["state"] not in ("pending", "withheld"):
+            continue  # already published (or being published): its recorded classification is frozen
+        status = r.get("status")
+        outcome = {"passed": "passed", "failed": "failed"}.get(status, "skipped")
+        failure = None
+        if status == "failed":
+            failure = {"category": MOBILE_CATEGORIES.get(r.get("category"), "inconclusive"), "confidence": r.get("confidence") or "low", "classifiedBy": "heuristic",
+                       "rationale": None, "signals": [r["reason"]] if r.get("reason") else []}
+            kept = (existing or {}).get("classification") or {}
+            if kept.get("classifiedBy") in ("user", "agent"):  # a person's or the agent's confirmation survives a second capture
+                failure.update({k: kept.get(k) for k in ("category", "confidence", "classifiedBy", "rationale")})
+        decision = decide(outcome, failure, None, run["statuses"], note=r.get("reason"))
+        if decision["publish"] and not physical and not allow_emulator:
+            decision = _withheld("not_physical_device", f"The flow ran on {device.get('kind') or 'an emulator/simulator'}, not on a physical device, so it is not recorded in Zephyr. "
+                                 "Run it on a phone, or capture again with the emulator explicitly allowed.")
+        m = mapping["mapped"].get(tid)
+        spec = specs.get(tid) or {}
+        fc = r.get("failedCommand") or {}
+        rec = {
+            "key": key, "testId": tid, "title": spec.get("title") or r.get("name") or r.get("flow"), "file": r.get("flow"), "line": None, "project": platform_,
+            "zephyrKey": m["zephyrKey"] if m else None, "mappingSource": m["source"] if m else None,
+            "mappingProblem": problems.get(tid) if decision["publish"] else None,
+            "runner": {"outcome": outcome, "attempts": 1, "durationMs": int(r.get("durationMs") or 0), "finalAttemptStatus": status,
+                       "exitCode": r.get("exitCode"), "timedOut": bool(r.get("timedOut"))},
+            "classification": {"category": (failure or {}).get("category"), "confidence": (failure or {}).get("confidence"),
+                               "classifiedBy": (failure or {}).get("classifiedBy"), "rationale": (failure or {}).get("rationale"),
+                               "signals": (failure or {}).get("signals", [])},
+            "label": decision["label"], "zephyrStatus": decision["zephyrStatus"], "reason": decision["reason"],
+            "bugEligible": decision["bugEligible"] and m is not None, "needsInvestigation": decision["needsInvestigation"],
+            "error": {"message": r.get("excerpt"), "command": fc.get("description"), "commandName": fc.get("name"), "commandMessage": fc.get("message"),
+                      "category": r.get("category"), "reason": r.get("reason"), "timedOut": bool(r.get("timedOut")), "stack": None,
+                      "location": fc.get("description")} if status == "failed" else None,
+            "spec": {"steps": spec["steps"], "expectedResults": spec["expectedResults"], "priority": spec.get("priority"),
+                     "preconditions": spec["preconditions"]} if spec else None,
+            "evidence": _evidence_mobile(root, r, status != "passed"),
+            "execution": {"state": "withheld" if not decision["publish"] else ("pending" if m else "unmapped"), "id": None, "error": None},
+            "narrative": (existing or {}).get("narrative") or {},
+        }
+        run["tests"][key] = rec
+        refreshed += 1
+    _sync_bugs(run)
     run["captured"] = True
     run["capturedAt"] = td.utc_now()
-    return {"tests": len(results["tests"]), "refreshed": refreshed, "runnerError": results.get("runnerError"),
-            "unmapped": sorted(r["testId"] for r in run["tests"].values() if r["execution"]["state"] == "unmapped")}
+    return {"tests": len(results), "refreshed": refreshed, "runnerError": None, "physicalDevice": physical, "device": run["environment"]["device"],
+            "unmapped": sorted(x["testId"] for x in run["tests"].values() if x["execution"]["state"] == "unmapped")}
 
 
 # --------------------------------------------------------------------------- publishing executions
@@ -504,6 +705,14 @@ def _where(run: dict, rec: dict) -> str:
     env = run.get("environment", {})
     app = env.get("applicationEnvironment")
     url = env.get("baseUrl")
+    if SURFACE == "mobile":
+        # 'the app (2.3.1, build 45) on Google Pixel 7 running Android 14 against staging on 9 Nov 2026'
+        s = "the app" + (f" ({env['buildVersion']})" if env.get("buildVersion") else "") + f" on {env.get('device') or 'the phone'}"
+        s += "" if env.get("physical", True) else " (emulator/simulator)"
+        s += f" running {env['os']}" if env.get("os") else ""
+        s += f" against {app}" if app else ""
+        when = _when(run)
+        return s + (f" on {when}" if when else "")
     s = browser_name(rec["project"]) + (f" on {env['os']}" if env.get("os") else "")
     if app or url:
         s += " against " + (app or "the test site") + (f" ({url})" if url else "")
@@ -514,7 +723,7 @@ def _where(run: dict, rec: dict) -> str:
 def actual_text(rec: dict, cfg=None) -> str:
     """What happened, in plain words: the hand-written actual result when there is one, else the error rephrased."""
     said = ((rec.get("narrative") or {}).get("actual") or "").strip()
-    text = said or plain_error((rec.get("error") or {}).get("message"))
+    text = said or rec_plain_error(rec)
     return zp.redact(text, cfg) if text else ""
 
 
@@ -571,7 +780,7 @@ def upload_evidence(root: Path, run: dict, rec: dict, cfg) -> None:
             ev.update(state="unsupported", note="This Zephyr Scale deployment did not accept attachments on executions; the file stays in the pipeline run folder")
             continue
         try:
-            multipart_upload(cfg, f"/testexecutions/{urllib.parse.quote(str(ref), safe='')}/attachments", Path(root).resolve() / "automation" / ev["path"],
+            multipart_upload(cfg, f"/testexecutions/{urllib.parse.quote(str(ref), safe='')}/attachments", app_dir(root) / ev["path"],
                              mimetypes.guess_type(ev["path"])[0] or ev["contentType"])
             ev.update(state="uploaded", note=None)
             caps["evidenceFailures"] = 0
@@ -606,7 +815,7 @@ def publish(root: Path, run: dict) -> dict:
             continue
         if ex["state"] != "done":
             body = {"projectKey": project, "testCaseKey": rec["zephyrKey"], "testCycleKey": cycle["key"], "statusName": rec["zephyrStatus"],
-                    "comment": execution_comment(run, rec, cfg), "executionTime": rec["playwright"]["durationMs"]}
+                    "comment": execution_comment(run, rec, cfg), "executionTime": runner(rec).get("durationMs", 0)}
             if run.get("executedAt"):  # Zephyr wants yyyy-MM-dd'T'HH:mm:ss'Z' (no fractional seconds)
                 body["actualEndDate"] = re.sub(r"\.\d+", "", run["executedAt"]) if run["executedAt"].endswith("Z") else run["executedAt"]
             ex.update(state="started", startedAt=td.utc_now(), error=None)
@@ -654,7 +863,8 @@ def bug_description(run: dict, rec: dict, bug: dict) -> tuple[str, list[str]]:
     shots = [e for e in rec["evidence"] if e["state"] != "missing"]
     browsers = ", ".join(browser_name(b) for b in sorted({r["project"] for r in run["tests"].values() if r["testId"] == rec["testId"]})) or browser_name(rec["project"])
 
-    md = [f"Found while running the automated regression check for \"{strip_id(rec['title'])}\"."]
+    md = [f"Found while running the regression check for \"{strip_id(rec['title'])}\" on the mobile app." if SURFACE == "mobile"
+          else f"Found while running the automated regression check for \"{strip_id(rec['title'])}\"."]
     if steps:
         md.append("**Steps to reproduce**\n" + (("Before you start: " + "; ".join(pre).rstrip(".") + ".\n\n") if pre else "")
                   + "\n".join(f"{n}. {s['action'].strip()}" for n, s in enumerate(steps, 1)))
@@ -670,18 +880,24 @@ def bug_description(run: dict, rec: dict, bug: dict) -> tuple[str, list[str]]:
     else:
         md.append("**Actual result**\nThe check failed, but no further detail was captured.")
         missing.append("actual result")
-    where = [f"- Browser: {browsers}"] + ([f"- OS: {env['os']}"] if env.get("os") else []) \
-        + ([f"- Environment: {env['applicationEnvironment']}" + (f" ({env['baseUrl']})" if env.get("baseUrl") else "")] if env.get("applicationEnvironment")
-           else ([f"- URL: {env['baseUrl']}"] if env.get("baseUrl") else []))
+    if SURFACE == "mobile":
+        where = [f"- Device: {env.get('device') or 'not recorded'}" + ("" if env.get("physical", True) else " (emulator/simulator)")] \
+            + ([f"- OS: {env['os']}"] if env.get("os") else []) + ([f"- App: {env['appId']}"] if env.get("appId") else []) \
+            + ([f"- Environment: {env['applicationEnvironment']}"] if env.get("applicationEnvironment") else [])
+    else:
+        where = [f"- Browser: {browsers}"] + ([f"- OS: {env['os']}"] if env.get("os") else []) \
+            + ([f"- Environment: {env['applicationEnvironment']}" + (f" ({env['baseUrl']})" if env.get("baseUrl") else "")] if env.get("applicationEnvironment")
+               else ([f"- URL: {env['baseUrl']}"] if env.get("baseUrl") else []))
     if env.get("buildVersion"):
         where.append(f"- Build: {env['buildVersion']}")
     else:
         missing.append("build/version")
     md.append("**Environment**\n" + "\n".join(where))
     if shots:
-        md.append("**Evidence**\n" + "\n".join(f"- {e['name'].capitalize()}: `{e['path']}`" for e in shots))
+        prefix = SURFACES[SURFACE]["dir"] + "/" if SURFACE == "mobile" else ""
+        md.append("**Evidence**\n" + "\n".join(f"- {e['name'].capitalize()}: `{prefix}{e['path']}`" for e in shots))
     else:
-        missing.append("screenshot/video/trace")
+        missing.append("screenshot/recording" if SURFACE == "mobile" else "screenshot/video/trace")
     if not spec.get("priority"):
         missing.append("priority (set by triage)")
     md.append(f"**Related**\nTest case {zkey}" + (f", Test Cycle {cycle}" if cycle else "") + ".")
@@ -705,7 +921,7 @@ def bug_drafts(root: Path, run: dict) -> dict:
                           f"marker label before creating anything: labels = \"{bug['marker']}\". If found run bug-record with its key; otherwise run bug-reset."})
             continue
         nar = rec.get("narrative") or {}
-        short = plain_error((rec.get("error") or {}).get("message")).splitlines()[0] if (rec.get("error") or {}).get("message") else ""
+        short = (rec_plain_error(rec).splitlines() or [""])[0]
         summary = _clip(nar.get("summary") or (f"{strip_id(rec['title'])}: {short.rstrip('.')}" if short else strip_id(rec["title"])), 240)
         description, missing = bug_description(run, rec, bug)
         prio = (rec.get("spec") or {}).get("priority")
@@ -776,7 +992,7 @@ def build_report(root: Path, run: dict) -> dict:
         "total": len(tests), "passed": c(lambda r: r["label"] == "passed"), "failedApplication": c(lambda r: r["label"] == "application_defect"),
         "automationIssues": c(lambda r: r["label"] == "automation_issue"), "infrastructureIssues": c(lambda r: r["label"] == "infrastructure_issue"),
         "flaky": c(lambda r: r["label"] == "flaky"), "needsInvestigation": c(lambda r: r["label"] == "needs_investigation"),
-        "skipped": c(lambda r: r["label"] == "skipped"),
+        "skipped": c(lambda r: r["label"] == "skipped"), "notPhysicalDevice": c(lambda r: r["label"] == "not_physical_device"),
     }
     pub = {"published": c(lambda r: r["execution"]["state"] == "done"), "failed": c(lambda r: r["execution"]["state"] == "failed"),
            "unknownOutcome": c(lambda r: r["execution"]["state"] == "blocked"), "pending": c(lambda r: r["execution"]["state"] in ("pending", "started")),
@@ -805,33 +1021,36 @@ def build_report(root: Path, run: dict) -> dict:
     for r in tests:
         for e in r["evidence"]:
             ev[e["state"]] = ev.get(e["state"], 0) + 1
-    rows = [{"testId": r["testId"], "project": r["project"], "title": r["title"], "zephyrKey": r["zephyrKey"], "playwright": r["playwright"]["outcome"], "classification": r["label"],
+    rows = [{"testId": r["testId"], "project": r["project"], "title": r["title"], "zephyrKey": r["zephyrKey"], "outcome": runner(r).get("outcome"), "classification": r["label"],
              "zephyrStatus": r["zephyrStatus"], "execution": r["execution"]["state"], "withheldReason": r["reason"] if r["execution"]["state"] == "withheld" else None, "executionId": r["execution"].get("id"), "reason": r["reason"],
              "error": r["execution"].get("error"), "mappingProblem": (r.get("mappingProblem") or {}).get("message"),
              "bug": (run["bugs"].get(r["testId"]) or {}).get("key") if r["bugEligible"] else None,
              "bugLink": (run["bugs"].get(r["testId"]) or {}).get("link", {}).get("state") if r["bugEligible"] else None} for r in sorted(tests, key=lambda r: r["key"])]
-    pr = run.get("pipelineRunId")
-    return {"updateRunId": run["updateRunId"], "project": run["project"]["key"], "scope": run["scope"], "testCycle": run["cycle"],
+    pr = source_run(run)
+    mobile = SURFACE == "mobile"
+    return {"updateRunId": run["updateRunId"], "surface": SURFACE, "project": run["project"]["key"], "scope": run["scope"], "testCycle": run["cycle"],
             "execution": executed, "publishing": pub, "bugs": bug_sum, "evidence": ev, "tests": rows, "recovery": recovery,
             "needsAttention": [r["testId"] for r in tests if r["label"] == "needs_investigation"], "open": operations_open(run),
             "complete": not operations_open(run),
-            "locations": {"state": f"automation/{RESULTS_DIRNAME}/{RUN_NAME}", "history": f"automation/{RESULTS_DIRNAME}/{HISTORY_NAME}",
-                          "pipelineRun": f"dependencies/runs/{pr}/" if pr else None,
-                          "playwrightReports": f"automation/reports/{pr}/" if pr else None, "evidence": f"automation/test-results/{pr}/" if pr else None},
+            "locations": {"state": f"{SURFACES[SURFACE]['dir']}/{RESULTS_DIRNAME}/{RUN_NAME}", "history": f"{SURFACES[SURFACE]['dir']}/{RESULTS_DIRNAME}/{HISTORY_NAME}",
+                          **({"mobileRun": f"mobile-automation/reports/{pr}/" if pr else None, "evidence": f"mobile-automation/artifacts/{pr}/" if pr else None} if mobile else
+                             {"pipelineRun": f"dependencies/runs/{pr}/" if pr else None,
+                              "playwrightReports": f"automation/reports/{pr}/" if pr else None, "evidence": f"automation/test-results/{pr}/" if pr else None})},
             "note": "Test execution and result publishing are separate: the 'execution' block says how the tests went, the 'publishing' and 'bugs' blocks say what reached Zephyr and Jira."}
 
 
 def report_markdown(rep: dict) -> str:
     e, p, b = rep["execution"], rep["publishing"], rep["bugs"]
-    lines = [f"# Execution result update {rep['updateRunId']}", "", f"- Zephyr project: {rep['project']}", f"- Test Cycle: {rep['testCycle'].get('key')} ({rep['testCycle'].get('name')})",
+    lines = [f"# Execution result update {rep['updateRunId']}" + (" (mobile)" if rep.get("surface") == "mobile" else ""), "", f"- Zephyr project: {rep['project']}", f"- Test Cycle: {rep['testCycle'].get('key')} ({rep['testCycle'].get('name')})",
              f"- Scope: {rep['scope'].get('text')}", "",
              "## Test execution", f"Total {e['total']} · passed {e['passed']} · application failures {e['failedApplication']} · automation issues {e['automationIssues']} · "
-             f"infrastructure issues {e['infrastructureIssues']} · flaky {e['flaky']} · needs investigation {e['needsInvestigation']} · skipped {e['skipped']}", "",
+             f"infrastructure issues {e['infrastructureIssues']} · flaky {e['flaky']} · needs investigation {e['needsInvestigation']} · skipped {e['skipped']}"
+             + (f" · not on a physical device {e['notPhysicalDevice']}" if e.get("notPhysicalDevice") else ""), "",
              "## Publishing to Zephyr", f"Published {p['published']} · not sent on purpose {p['withheld']} · failed {p['failed']} · unknown outcome {p['unknownOutcome']} · pending {p['pending']} · no mapping {p['notPublishedNoMapping']}", "",
              "## Jira bugs", f"Eligible {b['eligible']} · created {b['created']} · declined {b['declined']} · not created {b['notCreated']} · linked to Zephyr {b['linked']} · link failed {b['linkFailed']}", "",
-             "| Test | Zephyr | Playwright | Class | Zephyr status | Published | Bug | Link |", "|---|---|---|---|---|---|---|---|"]
+             f"| Test | Zephyr | {SURFACES[rep.get('surface', 'playwright')]['runner']} | Class | Zephyr status | Published | Bug | Link |", "|---|---|---|---|---|---|---|---|"]
     for r in rep["tests"]:
-        lines.append(f"| {r['testId']} ({r['project']}) | {r['zephyrKey'] or '-'} | {r['playwright']} | {r['classification']} | {r['zephyrStatus'] or 'not sent'} | {r['execution']} | {r['bug'] or '-'} | {r['bugLink'] or '-'} |")
+        lines.append(f"| {r['testId']} ({r['project']}) | {r['zephyrKey'] or '-'} | {r['outcome']} | {r['classification']} | {r['zephyrStatus'] or 'not sent'} | {r['execution']} | {r['bug'] or '-'} | {r['bugLink'] or '-'} |")
     if rep["recovery"]:
         lines += ["", "## Recovery"] + [f"- {x}" for x in rep["recovery"]]
     lines += ["", "## Locations"] + [f"- {k}: {v}" for k, v in rep["locations"].items() if v]
@@ -839,7 +1058,7 @@ def report_markdown(rep: dict) -> str:
 
 
 LABEL_TEXT = {"passed": "Passed", "application_defect": "Application defect", "automation_issue": "Script / test-data issue", "infrastructure_issue": "Environment issue",
-              "flaky": "Flaky", "needs_investigation": "Needs investigation", "skipped": "Skipped"}
+              "flaky": "Flaky", "needs_investigation": "Needs investigation", "skipped": "Skipped", "not_physical_device": "Not on a physical device"}
 STATE_TEXT = {"done": "Sent to Zephyr", "pending": "Waiting to be sent", "started": "Sending", "failed": "Send failed", "blocked": "Unknown outcome - check Zephyr",
               "unmapped": "No Zephyr test case", "withheld": "Not sent to Zephyr"}
 
@@ -848,9 +1067,16 @@ def report_html(rep: dict, run: dict, cfg=None) -> str:
     """One self-contained HTML page: every result, including the ones deliberately kept out of Zephyr, with the reason and the raw error."""
     e = html.escape
     red = (lambda s: zp.redact(s, cfg)) if cfg else (lambda s: s)
-    pr = run.get("pipelineRunId")
+    pr = source_run(run)
+    mobile = SURFACE == "mobile"
     recs = sorted(run["tests"].values(), key=lambda r: r["key"])
     withheld = [r for r in recs if r["execution"]["state"] == "withheld"]
+
+    def where_cell(r):
+        if not mobile:
+            return browser_name(r["project"])
+        env = run.get("environment", {})
+        return f"{env.get('device') or 'phone'} ({browser_name(r['project'])}{'' if env.get('physical', True) else ', emulator'})"
 
     def ev_links(r):
         out = [f'<a href="../../{e(ev["path"])}">{e(ev["name"])}</a>' for ev in r["evidence"] if ev["state"] != "missing"]
@@ -866,23 +1092,23 @@ def report_html(rep: dict, run: dict, cfg=None) -> str:
     for r in recs:
         bug = run["bugs"].get(r["testId"]) if r["bugEligible"] else None
         bug_cell = e(bug["key"]) if bug and bug.get("key") else ("&ndash;" if not bug else "not filed yet")
-        tries = f' ({r["playwright"]["attempts"]} tries)' if r["playwright"]["attempts"] > 1 else ""
+        tries = f' ({runner(r)["attempts"]} tries)' if runner(r).get("attempts", 1) > 1 else ""
         detail = ""
-        if r["playwright"]["outcome"] in ("failed", "flaky"):
+        if runner(r).get("outcome") in ("failed", "flaky"):
             raw_err = ANSI.sub("", red(((r.get("error") or {}).get("message")) or ""))
             detail = (f'<details><summary>Details</summary><p><b>What happened:</b> {e(actual_text(r, cfg) or "no detail captured")}</p>'
                       + (f'<pre>{e(raw_err)}</pre>' if raw_err else "") + f'<p class="meta">Evidence: {ev_links(r)}</p></details>')
-        rows.append(f'<tr><td><b>{e(r["testId"])}</b><br>{e(strip_id(r["title"]))}{detail}</td><td>{e(browser_name(r["project"]))}</td>'
-                    f'<td>{e(r["playwright"]["outcome"])}{tries}</td>'
+        rows.append(f'<tr><td><b>{e(r["testId"])}</b><br>{e(strip_id(r["title"]))}{detail}</td><td>{e(where_cell(r))}</td>'
+                    f'<td>{e(runner(r).get("outcome") or "")}{tries}</td>'
                     f'<td><span class="tag {e(r["label"])}">{e(LABEL_TEXT.get(r["label"], r["label"]))}</span></td><td>{zephyr_cell(r)}</td><td>{bug_cell}</td></tr>')
     held = []
     for r in withheld:
         raw = ANSI.sub("", red(((r.get("error") or {}).get("message")) or ""))
         said = ""
-        if r["playwright"]["outcome"] != "skipped":
+        if runner(r).get("outcome") != "skipped":
             said = f'<p><b>What happened:</b> {e(actual_text(r, cfg) or "no detail captured")}</p>'
         why = (r.get("classification") or {}).get("rationale")
-        held.append(f'<div class="card"><h3>{e(r["testId"])} &middot; {e(browser_name(r["project"]))} '
+        held.append(f'<div class="card"><h3>{e(r["testId"])} &middot; {e(where_cell(r))} '
                     f'<span class="tag {e(r["label"])}">{e(LABEL_TEXT.get(r["label"], r["label"]))}</span></h3><p>{e(strip_id(r["title"]))}</p>'
                     f'<p><b>Why it was not sent to Zephyr:</b> {e(red(r["reason"] or ""))}</p>' + said
                     + (f'<p><b>How it was classified:</b> {e(red(why))}</p>' if why else "")
@@ -892,14 +1118,15 @@ def report_html(rep: dict, run: dict, cfg=None) -> str:
     cards = "".join(f'<div class="stat"><div class="n">{n}</div><div class="l">{e(l)}</div></div>' for n, l in (
         (x["total"], "Tests run"), (x["passed"], "Passed"), (x["failedApplication"], "Application defects"),
         (p["withheld"], "Not sent to Zephyr"), (p["published"], "Sent to Zephyr"), (b["created"], "Bugs filed")))
-    link = f' <a href="../../reports/{e(pr)}/initial/html/index.html">Playwright HTML report</a>' if pr else ""
+    link = (f' <a href="../../reports/{e(pr)}/report.html">Mobile run report</a>' if mobile else
+            f' <a href="../../reports/{e(pr)}/initial/html/index.html">Playwright HTML report</a>') if pr else ""
     css = ("body{font:15px/1.5 system-ui,sans-serif;margin:0;background:#f6f7f9;color:#1d2330}main{max-width:1100px;margin:0 auto;padding:24px 16px}"
            "h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:28px 0 10px}.sub{color:#5b6475;margin:0 0 18px}"
            ".stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}.stat{background:#fff;border:1px solid #dde1e8;border-radius:8px;padding:12px}"
            ".n{font-size:26px;font-weight:600}.l{color:#5b6475;font-size:13px}table{width:100%;border-collapse:collapse;background:#fff;border:1px solid #dde1e8}"
            "th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #e8ebf0;vertical-align:top}th{background:#eef0f4;font-size:13px}"
            ".tag{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;background:#e8ebf0}.tag.passed{background:#d9f2e0}.tag.application_defect{background:#fbd9d9}"
-           ".tag.flaky,.tag.automation_issue,.tag.infrastructure_issue{background:#fdecc8}.tag.needs_investigation{background:#dce6fb}.ok{color:#1b7a3d}.hold{color:#8a5a00}.warn{color:#b3261e}"
+           ".tag.flaky,.tag.automation_issue,.tag.infrastructure_issue,.tag.not_physical_device{background:#fdecc8}.tag.needs_investigation{background:#dce6fb}.ok{color:#1b7a3d}.hold{color:#8a5a00}.warn{color:#b3261e}"
            ".card{background:#fff;border:1px solid #dde1e8;border-left:4px solid #e0a82e;border-radius:6px;padding:4px 14px 10px;margin:10px 0}.card h3{font-size:15px;margin:10px 0 2px}"
            ".card p{margin:6px 0}.meta{color:#5b6475;font-size:13px}pre{white-space:pre-wrap;background:#f1f3f6;padding:10px;border-radius:6px;font-size:12px;overflow:auto}"
            "a{color:#1a56c4}@media(prefers-color-scheme:dark){body{background:#14171d;color:#e4e7ee}.stat,table,.card{background:#1d222b;border-color:#333b49}th{background:#262c37}"
@@ -913,7 +1140,7 @@ def report_html(rep: dict, run: dict, cfg=None) -> str:
             "<p class=\"sub\" style=\"margin-top:12px\">Only passes and confirmed application defects are recorded in Zephyr. Flaky runs, script or test-data problems, "
             "environment problems, skipped tests and failures nobody has classified yet are kept out of it; they are listed here with the reason." + link + "</p>"
             + held_html
-            + "<h2>All results</h2><table><thead><tr><th>Test</th><th>Browser</th><th>Playwright</th><th>Classification</th><th>Zephyr</th><th>Bug</th></tr></thead><tbody>"
+            + f"<h2>All results</h2><table><thead><tr><th>Test</th><th>{SURFACES[SURFACE]['column']}</th><th>{SURFACES[SURFACE]['runner']}</th><th>Classification</th><th>Zephyr</th><th>Bug</th></tr></thead><tbody>"
             + "".join(rows) + "</tbody></table></main></body></html>\n")
 
 
@@ -989,8 +1216,9 @@ def cmd_map(a) -> int:
 
 def cmd_begin(a) -> int:
     root = Path(a.root).resolve()
-    if not (root / "automation").is_dir():
-        raise ExecError("NOT_SCAFFOLDED", f"{root / 'automation'} does not exist. Run /builder:init (or /builder:do-automation) first.", td.EXIT_MISSING)
+    if not app_dir(root).is_dir():
+        raise ExecError("NOT_SCAFFOLDED", f"{app_dir(root)} does not exist. Run " + ("/builder:build-mobile-automation (or /builder:mobile-init)" if SURFACE == "mobile"
+                        else "/builder:init (or /builder:do-automation)") + " first.", td.EXIT_MISSING)
     existing = load_run(root, required=False)
     if existing:
         if operations_open(existing):
@@ -1010,7 +1238,7 @@ def cmd_begin(a) -> int:
         errors, _ = check_statuses(execution_statuses(cfg, a.project), statuses)
         if errors:
             raise ExecError("STATUS_UNKNOWN", " ".join(errors))
-        run = {"version": RUN_VERSION, "updateRunId": f"ER-{td.utc_now().replace('-', '').replace(':', '').replace('T', '-')[:15]}-{secrets.token_hex(2)}",
+        run = {"version": RUN_VERSION, "surface": SURFACE, "updateRunId": f"ER-{td.utc_now().replace('-', '').replace(':', '').replace('T', '-')[:15]}-{secrets.token_hex(2)}",
                "createdAt": td.utc_now(), "project": {"key": a.project}, "scope": {"text": a.scope_text, "testIds": sorted(set(ids)),
                "onlyMapped": bool(a.only_mapped), "notRun": sorted(p["testId"] for p in mapping["problems"])},
                "statuses": statuses, "cycle": {}, "tests": {}, "bugs": {}, "captured": False, "capabilities": {}}
@@ -1053,13 +1281,16 @@ def cmd_capture(a) -> int:
     run = load_run(root)
     if run["cycle"].get("state") != "ready":
         raise ExecError("CYCLE_NOT_READY", "The Test Cycle is not confirmed yet. Use `resolve --cycle KEY` or `--retry-cycle` first.")
-    if run.get("captured") and run.get("pipelineRunId") != a.pipeline_run:
-        raise ExecError("CAPTURE_EXISTS", f"This update already holds the results of pipeline run {run['pipelineRunId']}. Finish it (or `abandon`) and begin a new update for another run.")
-    info = capture(root, run, a.pipeline_run)
+    source = a.run_id if SURFACE == "mobile" else a.pipeline_run
+    if not source:
+        raise ExecError("RUN_REQUIRED", "Give --run-id (the mobile run to read)." if SURFACE == "mobile" else "Give --pipeline-run.")
+    if run.get("captured") and source_run(run) != source:
+        raise ExecError("CAPTURE_EXISTS", f"This update already holds the results of run {source_run(run)}. Finish it (or `abandon`) and begin a new update for another run.")
+    info = capture_mobile(root, run, source, bool(a.allow_emulator)) if SURFACE == "mobile" else capture(root, run, source)
     save_run(root, run)
-    history(root, "captured", run, pipelineRunId=a.pipeline_run, tests=info["tests"])
+    history(root, "captured", run, **({"mobileRunId": source} if SURFACE == "mobile" else {"pipelineRunId": source}), tests=info["tests"])
     rep = build_report(root, run)
-    td.emit({"ok": True, **info, "execution": rep["execution"], "plan": [{"key": r["key"], "zephyrKey": r["zephyrKey"], "label": r["label"], "zephyrStatus": r["zephyrStatus"],
+    td.emit({"ok": True, **info, "execution": rep["execution"], "environment": run.get("environment") if SURFACE == "mobile" else None, "plan": [{"key": r["key"], "zephyrKey": r["zephyrKey"], "label": r["label"], "zephyrStatus": r["zephyrStatus"],
                                                                         "bugEligible": r["bugEligible"], "reason": r["reason"]} for r in sorted(run["tests"].values(), key=lambda r: r["key"])]})
     return td.EXIT_OK
 
@@ -1076,7 +1307,7 @@ def cmd_classify(a) -> int:
         raise ExecError("RATIONALE", "A rationale citing the evidence is required.")
     if rec["execution"]["state"] not in ("pending", "withheld", "unmapped"):
         raise ExecError("ALREADY_PUBLISHED", f"{rec['key']} is already published ({rec['execution']['state']}); its classification is final for this update.")
-    if rec["playwright"]["outcome"] != "failed":
+    if runner(rec).get("outcome") != "failed":
         raise ExecError("NOT_FAILED", "Only a failed result can be reclassified.")
     conf = {"high": "high", "h": "high", "medium": "medium", "m": "medium", "low": "low", "l": "low"}.get(a.confidence.lower())
     if not conf:
@@ -1282,7 +1513,7 @@ def cmd_status(a) -> int:
         td.emit({"ok": True, "run": None, "message": "No update run in progress."})
         return td.EXIT_OK
     rep = build_report(root, run)
-    td.emit({"ok": True, "updateRunId": run["updateRunId"], "pipelineRunId": run.get("pipelineRunId"), "captured": run["captured"], "complete": rep["complete"], "open": rep["open"],
+    td.emit({"ok": True, "updateRunId": run["updateRunId"], "pipelineRunId": run.get("pipelineRunId"), "mobileRunId": run.get("mobileRunId"), "surface": SURFACE, "captured": run["captured"], "complete": rep["complete"], "open": rep["open"],
              "testCycle": run["cycle"], "execution": rep["execution"], "publishing": rep["publishing"], "bugs": rep["bugs"]})
     return td.EXIT_OK
 
@@ -1321,6 +1552,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     def add(name, fn, *args, status=False):
         p = sub.add_parser(name)
         p.add_argument("--root", required=True)
+        p.add_argument("--surface", choices=sorted(SURFACES), default="playwright", help="playwright (default) or mobile (Maestro flows on a phone)")
         for spec in args:
             flags, kw = spec[0], spec[1]
             p.add_argument(*flags if isinstance(flags, tuple) else (flags,), **kw)
@@ -1337,7 +1569,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument("--cycle")
     g.add_argument("--new-cycle")
-    add("capture", cmd_capture, ("--pipeline-run", {"required": True}))
+    add("capture", cmd_capture, ("--pipeline-run", {}), ("--run-id", {}), ("--allow-emulator", {"action": "store_true"}))
     add("classify", cmd_classify, ("--test", {"required": True}), ("--category", {"required": True}), ("--confidence", {"required": True}),
         ("--rationale", {"required": True}), ("--by", {"default": "user", "choices": ["user", "agent"]}))
     add("narrate", cmd_narrate, ("--test", {"required": True}), ("--actual", {}), ("--summary", {}))
@@ -1354,6 +1586,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     add("report", cmd_report, ("--write", {"action": "store_true"}))
     add("abandon", cmd_abandon, ("--reason", {"required": True}))
     a = ap.parse_args(argv)
+    global SURFACE
+    SURFACE = a.surface
     if a.cmd == "resolve" and not (a.cycle or a.retry_cycle or (a.test and (a.execution_id or a.retry))):
         ap.error("resolve needs --cycle KEY, --retry-cycle, or --test KEY with --execution-id ID / --retry")
     try:

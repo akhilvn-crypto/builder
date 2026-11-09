@@ -47,6 +47,7 @@ const HELP = {
     'map plan | map register --test ID (--flow path | --status blocked|manual --reason text) | map changes | map status': 'test case ↔ flow traceability and change detection',
     'validate [--flow path ...] [--all] [--maestro]': 'YAML, references, selectors, assertions, secrets, appId, traceability',
     'suites': 'suite definitions in tests/ and the flows each one selects',
+    'scope --platform p (--flow f | --test ID | --feature name | --suite name | --tag t | --all)': 'which test cases / flows a scope selects (no device, nothing started)',
     'run --platform p (--flow f | --test ID | --feature name | --suite name | --all) [--env name] [--device id] [--plan] [--fail-fast] [--allow-emulator] [--timeout sec] [--strict]': 'execute flows one by one; evidence kept per flow',
     'report build [<runId>] | report list | report coverage [<runId>] | report formats [--set html,junit]': 'reports from recorded results',
     'validation status': 'is each in-scope platform validated on a real physical device?',
@@ -287,6 +288,24 @@ async function main() {
         return { name, description: s.description, includeTags: s.includeTags, excludeTags: s.excludeTags, flows };
       });
       printJson({ ok: true, suites: out });
+      return;
+    }
+
+    case 'scope': {
+      // What a scope would run, without a device and without starting anything (the mobile counterpart of listing tests before a run).
+      const cfg = needConfig();
+      const platform = platformOne ?? (enabledPlatforms(cfg).length === 1 ? enabledPlatforms(cfg)[0] : null);
+      if (!platform) throw new CliError('Both platforms are in scope; choose one: --platform android|ios.', { needsInput: 'platform' });
+      const selection = selectFlows(ctx, { flow: flags.flow, testId: flags.test, feature: flags.feature, suite: flags.suite, tag: flags.tag, all: flags.all }, { platform, traceability: loadTraceability(ctx) });
+      if (selection.selected.length === 0) throw new CliError('The scope selects no flow for this platform.', { needsInput: 'scope', details: { skipped: selection.skipped } });
+      const tests = selection.selected.map((f) => ({ testId: f.testCase ?? `untagged:${f.rel}`, flow: f.rel, name: f.name, tags: f.tags }));
+      const seen = new Map();
+      for (const t of tests) seen.set(t.testId, (seen.get(t.testId) ?? 0) + 1);
+      printJson({
+        ok: true, platform, scope: selection.scope.description, count: tests.length, tests,
+        untagged: tests.filter((t) => t.testId.startsWith('untagged:')).map((t) => t.flow),
+        duplicateIds: [...seen].filter(([, n]) => n > 1).map(([id]) => id), skipped: selection.skipped,
+      });
       return;
     }
 

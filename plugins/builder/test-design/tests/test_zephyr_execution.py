@@ -594,5 +594,213 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual(out["error"]["code"], "CAPTURE_EXISTS")
 
 
+MOBILE_RUN = "20261109-101500-android-smoke"
+
+
+class MobileExecutionTests(unittest.TestCase):
+    """The same publishing flow for Maestro runs (--surface mobile): state under mobile-automation/, device facts in the notes, no tool words."""
+
+    def setUp(self):
+        self.mock = Mock()
+        self.addCleanup(self.mock.stop)
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name).resolve()
+        (self.root / "mobile-automation").mkdir()
+        self.env = {"ZEPHYR_BASE_URL": self.mock.url, "ZEPHYR_API_TOKEN": TOKEN}
+        records = {f"test-design/test-cases/US-1-testcase.md::TC-{i}": {"sourceFile": "test-design/test-cases/US-1-testcase.md", "caseId": f"TC-{i}",
+                   "zephyrKey": f"RD-T{i}", "projectKey": "RD", "stages": {"created": True}} for i in range(1, 9) if i != 6}
+        self.write("test-design/state/zephyr-publishing.json", json.dumps({"version": 1, "records": records}))
+        self.rid = MOBILE_RUN
+        self.shot = f"artifacts/{self.rid}/2-tc-2/screenshot-failed.png"
+        for rel in (self.shot, f"artifacts/{self.rid}/2-tc-2/recording.mp4", f"artifacts/{self.rid}/1-tc-1/final.png", f"artifacts/{self.rid}/1-tc-1/recording.mp4"):
+            self.write("mobile-automation/" + rel, "x" * 100)
+        self.write_run(physical=True)
+        self.write("mobile-automation/state/test-specs.json", json.dumps({"cases": [
+            {"id": "TC-2", "title": "Cart total updates", "priority": "High", "preconditions": ["A user exists"],
+             "steps": [{"n": 1, "text": "Open the cart"}, {"n": 2, "text": "Add a second item", "expected": "Total shows 5"}], "expected": ["The cart total is 5"]}]}))
+        self.scope_file = self.write("scope.json", json.dumps({"tests": [{"testId": f"TC-{i}"} for i in (1, 2, 3, 4, 5, 7, 8)]}))
+
+    def write(self, rel, text):
+        p = self.root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text, encoding="utf-8")
+        return p
+
+    def flow(self, tid, status, **extra):
+        base = {"flow": f"flows/a/{tid.lower()}.yaml", "testCase": tid, "name": f"[{tid}] flow", "tags": ["smoke"], "status": status, "exitCode": 0 if status == "passed" else 1,
+                "timedOut": False, "durationMs": 4200, "artifacts": []}
+        base.update(extra)
+        return base
+
+    def failed(self, tid, category, confidence="low", reason="r", **extra):
+        return self.flow(tid, "failed", category=category, confidence=confidence, needsConfirmation=confidence != "high", reason=reason, excerpt="last log line", **extra)
+
+    def write_run(self, physical=True, status="completed", results=None):
+        shot = [f"artifacts/{self.rid}/2-tc-2/screenshot-failed.png", f"artifacts/{self.rid}/2-tc-2/recording.mp4", f"artifacts/{self.rid}/2-tc-2/maestro.log"]
+        results = results if results is not None else [
+            self.flow("TC-1", "passed", artifacts=[f"artifacts/{self.rid}/1-tc-1/final.png", f"artifacts/{self.rid}/1-tc-1/recording.mp4"]),
+            self.failed("TC-2", "application", reason="An expected outcome was not observed after the earlier steps succeeded.", artifacts=shot,
+                        failedCommand={"name": "assert", "description": "Assert that \"Total: 5\" is visible", "message": "Assertion is false: \"Total: 5\" is visible", "source": "log"}),
+            self.failed("TC-3", "automation", "medium", reason="The element the flow tried to use was not found on screen."),
+            self.failed("TC-4", "application", "low", reason="An expected outcome was not observed."),
+            self.failed("TC-5", "device", "high", reason="Maestro could not talk to the device."),
+            self.flow("TC-7", "not_run", reason="Not run: the device became unavailable during the run."),
+            self.flow("TC-8", "skipped", reason="ios-only flow, run is on android"),
+        ]
+        self.write(f"mobile-automation/reports/{self.rid}/run.json", json.dumps({
+            "runId": self.rid, "status": status, "outcome": "failed", "finishedAt": "2026-11-09T10:20:30.456Z", "platform": "android", "environment": "staging",
+            "device": {"id": "R5CT1234ABC", "model": "Pixel 7", "manufacturer": "Google", "osVersion": "14", "kind": "physical" if physical else "emulator", "physical": physical},
+            "app": {"id": "com.example.app", "versionName": "2.3.1", "versionCode": "45"}, "maestro": {"version": "1.39.0"}}))
+        self.write(f"mobile-automation/reports/{self.rid}/results.json", json.dumps(results))
+
+    def cli(self, *args, env=None):
+        e = {k: v for k, v in os.environ.items() if not k.startswith("ZEPHYR_")}
+        e.update(self.env if env is None else env)
+        proc = subprocess.run([sys.executable, str(SCRIPT), args[0], "--root", str(self.root), "--surface", "mobile", *map(str, args[1:])],
+                              capture_output=True, text=True, encoding="utf-8", env=e)
+        out = json.loads(proc.stdout) if proc.stdout.strip() else {}
+        self.assertNotIn(TOKEN, proc.stdout + proc.stderr)
+        return proc.returncode, out
+
+    def begin(self):
+        code, out = self.cli("begin", "--project", "RD", "--cycle", "RD-R1", "--scope-file", self.scope_file, "--scope-text", "smoke on android")
+        self.assertEqual(code, 0, out)
+
+    def captured(self, *extra, run_id=None):
+        self.begin()
+        code, out = self.cli("capture", "--run-id", run_id or self.rid, *extra)
+        self.assertEqual(code, 0, out)
+        return out
+
+    def state(self):
+        return json.loads((self.root / "mobile-automation" / "execution-results" / "execution-run.json").read_text(encoding="utf-8"))
+
+    def test_results_land_in_the_mobile_folder_and_only_a_pass_and_a_confirmed_defect_are_sent(self):
+        out = self.captured()
+        self.assertTrue((self.root / "mobile-automation" / "execution-results" / "execution-run.json").is_file())
+        self.assertFalse((self.root / "automation").exists())
+        plan = {p["key"].split("@")[0]: p for p in out["plan"]}
+        self.assertEqual(plan["TC-1"]["zephyrStatus"], "Pass")
+        self.assertEqual((plan["TC-2"]["label"], plan["TC-2"]["zephyrStatus"], plan["TC-2"]["bugEligible"]), ("needs_investigation", None, False))  # a screen assertion needs a person's eyes
+        self.assertEqual(plan["TC-3"]["label"], "automation_issue")
+        self.assertEqual(plan["TC-5"]["label"], "infrastructure_issue")
+        self.assertEqual((plan["TC-7"]["label"], plan["TC-7"]["zephyrStatus"]), ("skipped", None))
+        self.assertIn("device became unavailable", plan["TC-7"]["reason"])
+        self.assertEqual(plan["TC-8"]["label"], "skipped")
+        self.assertEqual(self.state()["surface"], "mobile")
+        self.assertEqual(self.state()["environment"]["device"], "Google Pixel 7")
+        self.assertEqual(self.state()["environment"]["buildVersion"], "2.3.1 (build 45)")
+        code, rep = self.cli("report")
+        self.assertEqual(rep["execution"]["passed"], 1)
+        self.assertEqual(rep["locations"]["mobileRun"], f"mobile-automation/reports/{self.rid}/")
+
+    def test_a_confirmed_defect_is_sent_with_the_device_in_the_note_and_gets_a_bug_in_plain_words(self):
+        self.captured()
+        code, out = self.cli("classify", "--test", "TC-2", "--category", "application_defect", "--confidence", "high",
+                             "--rationale", "Screenshot shows the cart total reading 4 after the second item", "--by", "agent")
+        self.assertEqual(code, 0, out)
+        code, out = self.cli("narrate", "--test", "TC-2", "--actual", "After adding the second item the cart total still showed 4 instead of 5.",
+                             "--summary", "Cart total does not update after adding a second item")
+        self.assertEqual(code, 0, out)
+        code, out = self.cli("publish")
+        self.assertEqual(code, 0, out)
+        sent = {x["testCaseKey"]: x for x in self.mock.executions}
+        self.assertEqual(set(sent), {"RD-T1", "RD-T2"})
+        self.assertEqual(sent["RD-T2"]["statusName"], "Fail")
+        note = sent["RD-T2"]["comment"]
+        self.assertIn("Google Pixel 7", note)
+        self.assertIn("Android 14", note)
+        self.assertIn("2.3.1", note)
+        self.assertIn("staging", note)
+        self.assertIn("After adding the second item", note)
+        for word in ("Maestro", "yaml", "tapOn", "assert", "TC-2", MOBILE_RUN, "emulator"):
+            self.assertNotIn(word, note, word)
+        # evidence: the failure screenshot and one recording for the defect, only a screenshot for the pass (no recording of a pass)
+        self.assertEqual(len(self.mock.attachments), 3)
+        code, drafts = self.cli("bug-drafts")
+        d = drafts["drafts"][0]
+        self.assertEqual(d["summary"], "Cart total does not update after adding a second item")
+        body = d["description"]
+        self.assertIn("- Device: Google Pixel 7", body)
+        self.assertIn("- OS: Android 14", body)
+        self.assertIn("- App: com.example.app", body)
+        self.assertIn("`mobile-automation/" + self.shot + "`", body)
+        self.assertNotIn("build/version", d["notAvailable"])
+        self.assertEqual(d["labels"], [self.state()["bugs"]["TC-2"]["marker"]])
+        for word in ("Maestro", "yaml", "Assertion is false"):
+            self.assertNotIn(word, body, word)
+
+    def test_without_a_hand_written_account_the_failed_step_is_rephrased_never_pasted(self):
+        self.captured()
+        self.cli("classify", "--test", "TC-2", "--category", "application_defect", "--confidence", "high", "--rationale", "screen shows 4", "--by", "agent")
+        code, drafts = self.cli("bug-drafts")
+        d = drafts["drafts"][0]
+        self.assertIn('Expected "Total: 5" to be shown on the screen, but it was not.', d["description"])
+        self.assertNotIn("Assertion is false", d["description"])
+        self.assertIsNotNone(d["needsWriting"])
+
+    def test_a_run_on_an_emulator_is_not_recorded_unless_it_is_explicitly_allowed(self):
+        self.write_run(physical=False)
+        out = self.captured()
+        plan = {p["key"].split("@")[0]: p for p in out["plan"]}
+        self.assertEqual((plan["TC-1"]["label"], plan["TC-1"]["zephyrStatus"]), ("not_physical_device", None))
+        self.assertFalse(out["physicalDevice"])
+        self.cli("abandon", "--reason", "retry")
+        out = self.captured("--allow-emulator")
+        self.assertEqual({p["key"].split("@")[0]: p for p in out["plan"]}["TC-1"]["zephyrStatus"], "Pass")
+        self.cli("publish")
+        self.assertIn("emulator/simulator", self.mock.executions[0]["comment"])
+
+    def test_a_confirmation_survives_capturing_the_same_run_again(self):
+        self.captured()
+        self.cli("classify", "--test", "TC-2", "--category", "application_defect", "--confidence", "high", "--rationale", "screen shows 4", "--by", "agent")
+        code, out = self.cli("capture", "--run-id", self.rid)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.state()["tests"]["TC-2@android"]["label"], "application_defect")
+        code, out = self.cli("capture", "--run-id", "another-run")
+        self.assertEqual(out["error"]["code"], "CAPTURE_EXISTS")
+
+    def test_unusable_runs_are_refused_before_anything_is_recorded(self):
+        self.begin()
+        code, out = self.cli("capture", "--run-id", "nope")
+        self.assertEqual(out["error"]["code"], "MOBILE_RUN_MISSING")
+        self.write_run(status="running")
+        code, out = self.cli("capture", "--run-id", self.rid)
+        self.assertEqual(out["error"]["code"], "RUN_NOT_FINISHED")
+        self.write_run(results=[self.flow("TC-7", "not_run", reason="x")])
+        code, out = self.cli("capture", "--run-id", self.rid)
+        self.assertEqual(out["error"]["code"], "NOTHING_EXECUTED")
+        self.write_run(results=[self.flow("TC-1", "passed"), self.flow("TC-1", "passed")])
+        code, out = self.cli("capture", "--run-id", self.rid)
+        self.assertEqual(out["error"]["code"], "DUPLICATE_TEST_ID")
+        code, out = self.cli("capture")
+        self.assertEqual(out["error"]["code"], "RUN_REQUIRED")
+
+    def test_text_that_looks_pasted_from_maestro_is_refused(self):
+        self.captured()
+        for text in ("Assertion is false: \"Total: 5\" is visible", "Element not found: Text Matching Regex: Pay", "The tapOn step failed", "flows/a/tc-2.yaml failed"):
+            code, out = self.cli("narrate", "--test", "TC-2", "--actual", text)
+            self.assertEqual(out["error"]["code"], "NARRATIVE_ROBOTIC", text)
+        code, out = self.cli("narrate", "--test", "TC-2", "--actual", "The cart total still showed 4 after adding a second item.")
+        self.assertEqual(code, 0, out)
+
+    def test_the_html_report_names_the_device_links_the_mobile_report_and_lists_what_was_held_back(self):
+        self.captured()
+        self.cli("publish")
+        code, rep = self.cli("report", "--write")
+        page = (self.root / "mobile-automation" / "execution-results" / "reports" / f"{rep['updateRunId']}.html").read_text(encoding="utf-8")
+        self.assertIn("<th>Device</th>", page)
+        self.assertIn("<th>Maestro</th>", page)
+        self.assertIn("Google Pixel 7 (Android)", page)
+        self.assertIn(f"../../reports/{self.rid}/report.html", page)
+        self.assertIn("Not sent to Zephyr", page)
+        self.assertIn("TC-3", page)
+        md = (self.root / "mobile-automation" / "execution-results" / "reports" / f"{rep['updateRunId']}.md").read_text(encoding="utf-8")
+        self.assertIn("(mobile)", md)
+        self.assertIn("| Maestro |", md)
+        self.assertFalse((self.root / "automation").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

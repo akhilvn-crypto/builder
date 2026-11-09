@@ -1,7 +1,7 @@
 {
   "name": "builder",
   "displayName": "Builder",
-  "version": "0.30.0",
+  "version": "0.31.0",
   "description": "Agentic test pipeline: detailed user stories to analysed, designed and generated test cases, automation readiness, then reviewed, executed, self-healing Playwright tests with traceability and auditable on-disk run state. Also takes test cases you supply. Plus a separate Maestro mobile framework for Flutter apps: flows generated from test cases, validated on real devices.",
   "author": {
     "name": "Akhil V Nair",

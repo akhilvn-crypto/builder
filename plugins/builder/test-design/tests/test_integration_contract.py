@@ -18,7 +18,7 @@ SKILLS = PLUGIN_ROOT / "skills"
 
 DESIGN_COMMANDS = {"design-test-n-automation", "generate-test-cases", "publish-zephyr"}
 # the plugin's whole user-facing command set: test design, design + automation, and the separate automation flow
-ALL_COMMANDS = DESIGN_COMMANDS | {"do-automation", "update-execution-result", "build-test-reports"}
+ALL_COMMANDS = DESIGN_COMMANDS | {"do-automation", "update-execution-result", "build-test-reports", "build-mobile-automation", "mobile-update-execution-result"}
 DESIGN_AGENTS = {"story-analyser", "story-worker", "test-coverage-designer", "test-case-generator", "test-case-quality-checker",
                  "test-design-orchestrator"}
 DESIGN_SKILLS = {"story-analysis", "story-source-discovery", "test-case-authoring", "test-case-validation", "test-coverage-design",
@@ -113,7 +113,7 @@ class PublishIsManualOnly(unittest.TestCase):
             rel = p.relative_to(PLUGIN_ROOT).as_posix()
             text = p.read_text(encoding="utf-8")
             if rel in ("commands/publish-zephyr.md", "skills/zephyr-publishing/SKILL.md",
-                       "commands/update-execution-result.md", "skills/execution-result-publishing/SKILL.md"):
+                       "commands/update-execution-result.md", "skills/execution-result-publishing/SKILL.md", "commands/mobile-update-execution-result.md"):
                 continue  # the publish pair, and the execution-result pair that reads the state the publish command wrote
             if rel in self.ALLOWED:
                 # allowed to name the command only to say it is manual / never part of the workflow
@@ -262,7 +262,7 @@ class ExecutionUpdateIsManualOnly(unittest.TestCase):
 
     NEEDLES = ("update-execution-result", "zephyr-execution.py", "execution-result-publishing")
     ALLOWED = {  # files that may name it, and then only to say it is a separate, manual action
-        "commands/update-execution-result.md", "skills/execution-result-publishing/SKILL.md",
+        "commands/update-execution-result.md", "skills/execution-result-publishing/SKILL.md", "commands/mobile-update-execution-result.md",
     }
 
     def test_nothing_else_in_the_plugin_reaches_it(self):
@@ -278,6 +278,17 @@ class ExecutionUpdateIsManualOnly(unittest.TestCase):
         self.assertEqual(frontmatter(COMMANDS / "update-execution-result.md")["disable-model-invocation"], "true")
         self.assertEqual(frontmatter(SKILLS / "execution-result-publishing" / "SKILL.md")["disable-model-invocation"], "true")
         self.assertEqual(frontmatter(SKILLS / "execution-result-publishing" / "SKILL.md")["user-invocable"], "false")
+
+    def test_the_mobile_command_is_just_as_manual_and_reads_the_shared_rules(self):
+        path = COMMANDS / "mobile-update-execution-result.md"
+        fm = frontmatter(path)
+        self.assertEqual(fm["disable-model-invocation"], "true")
+        text = path.read_text(encoding="utf-8")
+        for needle in ("Manual invocation only", "--surface mobile", "execution-result-publishing/SKILL.md", "Phase A only", "never delete a Zephyr execution",
+                       "ER preflight", "ER map", "ER begin", "ER capture --run-id", "MCLI scope", "physical"):
+            self.assertIn(needle, text, needle)
+        self.assertLess(text.index("ER preflight"), text.index("ER begin"))
+        self.assertLess(text.index("ER begin"), text.index("ER capture --run-id"))
 
     def test_no_agent_has_the_skill_or_the_jira_tools(self):
         for p in AGENTS.glob("*.md"):

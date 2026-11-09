@@ -671,6 +671,27 @@ test('run: selection by flow, test case ID and tag; platform-specific flows are 
   assert.equal(calls(p).length, 0, '--plan never starts a flow');
 });
 
+test('scope: lists the test cases a scope selects without a device, flags untagged flows and duplicate IDs, and starts nothing', (t) => {
+  const p = newProject(t);
+  p.devices = [];
+  p.writeFlow('a/tc-001.yaml', testFlow({ id: 'TC-001', tags: ['smoke'] }));
+  p.writeFlow('a/tc-002.yaml', testFlow({ id: 'TC-002', tags: ['regression'] }));
+  p.writeFlow('a/tc-002-again.yaml', testFlow({ id: 'TC-002', tags: ['regression'] }));
+  p.writeFlow('a/tc-003.ios.yaml', testFlow({ id: 'TC-003', tags: ['regression'] }));
+  p.writeFlow('a/loose.yaml', testFlow({ id: 'TC-009', tags: ['regression'] }).replace(/# testCase: TC-009\r?\n/, ''));
+  const scope = (...a) => p.run(['scope', '--platform', 'android', ...a]);
+  const all = scope('--all');
+  assert.equal(all.code, 0, all.stdout);
+  assert.deepEqual(all.json.tests.map((x) => x.testId).sort(), ['TC-001', 'TC-002', 'TC-002', `untagged:flows/a/loose.yaml`]);
+  assert.deepEqual(all.json.duplicateIds, ['TC-002']);
+  assert.deepEqual(all.json.untagged, ['flows/a/loose.yaml']);
+  assert.deepEqual(all.json.skipped.map((s) => s.rel), ['flows/a/tc-003.ios.yaml']);
+  assert.deepEqual(scope('--tag', 'smoke').json.tests.map((x) => x.testId), ['TC-001']);
+  assert.deepEqual(scope('--test', 'TC-001').json.tests.map((x) => x.flow), ['flows/a/tc-001.yaml']);
+  assert.equal(scope().json.needsInput, 'scope');
+  assert.equal(calls(p).length, 0, 'scope never starts a flow');
+});
+
 // ------------------------------------------------------------------ reports and coverage
 
 test('report: coverage lists every test case as automated or not (with the reason); formats can be changed', (t) => {
