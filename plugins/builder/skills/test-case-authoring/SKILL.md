@@ -30,6 +30,8 @@ Format and field rules: read `test-design/rules/test-case-format.md` and `test-d
 ## Style
 
 - Prefer 3-8 steps. Split a case that tests two behaviours.
+- **Write one case per condition.** Never merge or drop conditions to shorten the file; a long file is expected. Cases that share the same setup are still separate cases (own Preconditions, own data), because each must run and report alone.
+- Tag `derived` conditions with `derived` and `robustness` conditions with `robustness` (plus a technique tag such as `boundary`, `negative`, `role`), and always give them a `Priority`. A `robustness` case's Expected Results assert only a universal invariant (no unhandled error or blank page, rejected input not saved, no duplicate record, text shown as text); never a message, redirect, limit or timing the story does not state.
 - Each expected result must be something a test can assert: visible text, URL, enabled/disabled state, count, stored value. Not "works", "as expected", "correctly".
 - No selectors, CSS/XPath, `page.` calls, waits, or framework names. No "click the button with id ...".
 - Never copy a secret value; never invent a message, limit or field the story does not state.

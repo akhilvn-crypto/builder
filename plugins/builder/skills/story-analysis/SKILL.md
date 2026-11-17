@@ -24,7 +24,13 @@ One JSON object (`test-design/schemas/story-analysis-input.schema.json`): `run_i
    - `preconditions`: accounts, roles, plans, records the story needs.
    - `dependencies`: other story IDs, systems or data the story needs. Take what the story states; use `dependency_context` only to word a precondition or journey step.
    - `messages`: exact UI texts, URLs or values the story states, so expected results can quote them.
+   - `inputs`: **every** field, control or data item the story names that a user supplies or a rule constrains (also those mentioned in passing), each with `required` when stated, `constraints` (only the limits, formats and allowed values the story states, with exact values) and `governed_by` (the `AC-`/`BR-` labels that govern it).
+   - `roles`: every role, user type or plan the story distinguishes.
+   - `states_and_transitions`: every status and each transition the story allows or forbids.
+   - `data_effects`: what is created, changed, removed, calculated or shown afterwards, and where.
    - `test_design_considerations`: observations that help choose techniques (a numeric limit, a state machine, role-based outcomes). Not test cases.
+
+   **Be exhaustive, not summarising.** The coverage design can only test what the analysis surfaced: split a compound criterion into its separate behaviours (one `behaviour_to_validate` entry each), keep every exact value, message and limit, and do not drop a field, role or state because it seems minor. Exhaustive still means *stated*: list nothing the story and the supplied rules do not say.
 3. **Decide testability.** If the story states no observable behaviour (a pure heading, a placeholder), set `testable: false` with `not_testable_reason`; the orchestrator records `no_testable_behaviour`.
 4. **Raise ambiguity sparingly.** Put missing or unclear information in `ambiguities` with the question in one sentence. Set `blocking: true` only when the gap stops you writing an assertable expected result for a stated criterion (for example "locked for a while" with no duration, or a message that is not given and cannot be observed otherwise), and add `why` and the `blocks` labels. Detail that merely limits depth is `blocking: false`. Never fill a gap with an assumption.
 5. **Return** one JSON object (not a file, not a report), `analysis_complete: true`, then finish:
@@ -41,13 +47,20 @@ One JSON object (`test-design/schemas/story-analysis-input.schema.json`): `run_i
   "business_rules": [{"label": "BR-1", "text": "Account locked 15 minutes after 5 consecutive failures"}],
   "preconditions": ["A registered, active account exists"],
   "messages": ["Invalid email or password"],
+  "inputs": [
+    {"name": "Email", "required": true, "governed_by": ["AC-1", "AC-2"]},
+    {"name": "Password", "required": true, "governed_by": ["AC-1", "AC-2", "BR-1"]}
+  ],
+  "roles": ["Registered, active user"],
+  "states_and_transitions": ["Account becomes locked after 5 consecutive failed sign-ins and unlocks after 15 minutes"],
+  "data_effects": ["A successful sign-in opens the dashboard"],
   "test_design_considerations": ["Boundary at 5 consecutive failures (4, 5)"],
   "ambiguities": [],
   "analysis_complete": true
 }
 ```
 
-Optional fields that would be empty (`business_rules`, `preconditions`, `dependencies`, `relevant_non_functional_expectations`, `messages`, `test_design_considerations`, `ambiguities`, `testable`) may be omitted. Labels are unique across `AC-`, `BR-` and `NFR-`.
+Optional fields that would be empty (`business_rules`, `preconditions`, `dependencies`, `relevant_non_functional_expectations`, `messages`, `inputs`, `roles`, `states_and_transitions`, `data_effects`, `test_design_considerations`, `ambiguities`, `testable`) may be omitted. Labels are unique across `AC-`, `BR-` and `NFR-`.
 
 ## Never
 

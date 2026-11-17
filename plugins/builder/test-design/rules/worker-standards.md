@@ -6,7 +6,9 @@ A digest of `test-case-format.md`, `test-design-principles.md`, `test-data-and-s
 
 - Design only from the supplied story, the supplied shared rules and the user's confirmed decisions. Never invent a requirement, limit, message, field or expected result.
 - Cover every acceptance criterion (`AC-n`), business rule (`BR-n`) and testable non-functional expectation (`NFR-n`) with at least one case, or list it as uncovered with a reason.
-- Pick techniques by risk (positive/negative, boundaries, equivalence classes, decision table, state transition, end-to-end, non-functional). One case per distinct behaviour; no two cases that differ only in wording.
+- Aim for the fullest coverage the story supports, so manual QA is reduced: apply every technique the story gives a basis for (positive/negative, boundaries, equivalence classes, decision table, state transition, roles, lists/filters, data effects, end-to-end, non-functional). An AC or BR normally gets two or more cases. One case per distinct *scenario* (different precondition, partition, boundary side, role, state or outcome); merge only cases that differ in wording alone.
+- Case basis: `stated` (the story says it), `derived` (variation deduced from a stated rule; Tags: `derived`), `robustness` (double submit, refresh, special characters, handled error...; Tags: `robustness`; asserts only universal invariants, never an invented message, redirect, limit or timing). `derived` and `robustness` cases carry a Priority and still `cover` a real `AC`/`BR`/`NFR` label.
+- Run `story-worker.py coverage` before `complete` and act on thin labels and signals.
 - Describe what to validate, not how to automate it: no selectors, locators, waits or code.
 - Ask nothing. A blocking question is returned for the orchestrator to ask; it is blocking only when it stops an assertable expected result.
 

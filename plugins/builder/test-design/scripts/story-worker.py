@@ -4,6 +4,7 @@
     story-worker.py check-input --input FILE
     story-worker.py begin       --input FILE
     story-worker.py complete    --input FILE --analysis FILE [--draft FILE --meta FILE] [--conditions FILE]
+    story-worker.py coverage    --analysis FILE --draft FILE --meta FILE [--conditions FILE]
 
 A worker owns exactly two files: its story's ``test-design/test-cases/<story>-testcase.md`` and its
 ``test-design/state/results/<story>.result.json``. These commands never write ``workflow.json``,
@@ -16,6 +17,10 @@ A worker owns exactly two files: its story's ``test-design/test-cases/<story>-te
              adopting anything without the orchestrator's say-so), writes the result file and prints the
              compact reply the worker returns as its final answer. It stops, without saving, when the
              story is not testable, a blocking question is open, or the file needs a user decision.
+``coverage`` read-only depth check run before ``complete``: cases per criterion and per basis (stated /
+             derived / robustness, from the Tags), criteria with a single case (``thin``), analysis inputs and
+             roles no case mentions (``untouched``) and ``signals`` that the set is probably too shallow.
+             Advisory only; it never blocks a save and writes nothing.
 
 Output is JSON. Exit codes: 0 ok (including "needs the user"), 1 failed / invalid, 2 usage, 3 conflict,
 4 missing, 5 outside the output folder, 6 I/O error.
@@ -245,6 +250,73 @@ def _declared_uncovered(path: str | None) -> list[dict]:
     return out
 
 
+# --------------------------------------------------------------------------- coverage depth (advisory)
+
+CASES_PER_CRITERION_FLOOR = 2   # an AC or BR with fewer cases is "thin"; fewer than this x (AC + BR) cases overall is a signal
+BASIS_TAGS = ("derived", "robustness")
+
+
+def coverage_report(analysis: dict, doc, meta: dict[str, dict], declared: list[dict]) -> dict:
+    ac = [x["label"] for x in analysis.get("acceptance_criteria_interpretation", [])]
+    br = [x["label"] for x in analysis.get("business_rules", [])]
+    nfr = [x["label"] for x in analysis.get("relevant_non_functional_expectations", [])]
+    per: dict[str, int] = {lab: 0 for lab in ac + br + nfr}
+    basis = {"stated": 0, "derived": 0, "robustness": 0}
+    techniques: set[str] = set()
+    text_parts: list[str] = []
+    for c in doc.cases:
+        m = meta.get(c.id or "", {})
+        for lab in {cov.partition("#")[2] for cov in m.get("covers", [])}:
+            if lab in per:
+                per[lab] += 1
+        tags = {t.lower() for t in c.tags}
+        basis[next((b for b in BASIS_TAGS if b in tags), "stated")] += 1
+        techniques |= {str(t).lower() for t in m.get("techniques", [])} | tags
+        text_parts.append(" ".join([c.title, *c.preconditions, *(f"{s.text} {s.expected or ''}" for s in c.steps),
+                                    *(t for _, t in c.expected), *(getattr(d, "raw", str(d)) for d in c.data.values())]))
+    blob = _norm(" ".join(text_parts))
+    waived = {d["label"] for d in declared}
+    thin = [lab for lab in ac + br if per[lab] == 1 and lab not in waived]
+    missing = [lab for lab in ac + br + nfr if per[lab] == 0 and lab not in waived]
+    untouched = []
+    for it in analysis.get("inputs", []):
+        if _norm(it["name"]) not in blob:
+            untouched.append({"kind": "input", "name": it["name"]})
+    for role in analysis.get("roles", []):
+        if _norm(role) not in blob:
+            untouched.append({"kind": "role", "name": role})
+    signals = []
+    total, floor = len(doc.cases), CASES_PER_CRITERION_FLOOR * (len(ac) + len(br))
+    if total < floor:
+        signals.append({"code": "LOW_VOLUME", "message": f"{total} case(s) for {len(ac)} criteria and {len(br)} rule(s); "
+                        f"expect at least {floor}. Re-run the completeness sweep or explain each skip in sweep_skipped."})
+    if ac and not ({"negative"} & techniques):
+        signals.append({"code": "NO_NEGATIVE", "message": "No negative case (technique or tag 'negative'); check every stated failure and invalid input."})
+    limit_text = " ".join([x["text"] for x in analysis.get("business_rules", [])] +
+                          [c for it in analysis.get("inputs", []) for c in it.get("constraints", [])])
+    if re.search(r"\d", limit_text) and not any("boundary" in t for t in techniques):
+        signals.append({"code": "NO_BOUNDARY", "message": "A rule or input states a numeric limit but no case is a boundary case (min-1/min/max/max+1)."})
+    if analysis.get("inputs") and basis["derived"] == 0:
+        signals.append({"code": "NO_DERIVED", "message": "The story names inputs but no case is tagged 'derived' (partitions, mandatory/empty, formats, data persisted)."})
+    if analysis.get("roles") and len(analysis["roles"]) > 1 and not any("role" in t or "permission" in t for t in techniques):
+        signals.append({"code": "NO_ROLE_CASES", "message": "Several roles are named but no case is tagged/techniqued 'role' or 'permission'."})
+    return {"cases": total, "byBasis": basis, "perCriterion": per, "thin": thin, "missing": missing,
+            "untouched": untouched, "signals": signals, "advisory": True}
+
+
+def cmd_coverage(a) -> int:
+    try:
+        analysis = json.loads(sas.strip_fence(td.read_text(Path(a.analysis))))
+        doc = td.parse_test_cases(td.read_text(Path(a.draft)))
+        meta = pc.normalise_meta(json.loads(td.read_text(Path(a.meta))))
+    except (OSError, ValueError) as e:
+        raise td.SafeOpError("COVERAGE_INPUT", f"Could not read the analysis, draft or metadata: {e}", td.EXIT_MISSING)
+    if not isinstance(analysis, dict):
+        raise td.SafeOpError("COVERAGE_INPUT", "The analysis must be one JSON object.", td.EXIT_MISSING)
+    td.emit({"ok": True, **coverage_report(analysis, doc, meta, _declared_uncovered(a.conditions))})
+    return td.EXIT_OK
+
+
 def cmd_complete(a) -> int:
     inp = load_input(a.input)
     sid, c = inp["story_id"], inp["worker_contract"]
@@ -364,6 +436,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("begin"); p.add_argument("--input", required=True); p.set_defaults(fn=cmd_begin)
     p = sub.add_parser("complete"); p.add_argument("--input", required=True); p.add_argument("--analysis", required=True)
     p.add_argument("--draft"); p.add_argument("--meta"); p.add_argument("--conditions"); p.set_defaults(fn=cmd_complete)
+    p = sub.add_parser("coverage"); p.add_argument("--analysis", required=True); p.add_argument("--draft", required=True)
+    p.add_argument("--meta", required=True); p.add_argument("--conditions"); p.set_defaults(fn=cmd_coverage)
     return ap
 
 

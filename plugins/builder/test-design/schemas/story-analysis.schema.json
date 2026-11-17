@@ -49,6 +49,24 @@
       }
     },
     "test_design_considerations": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "inputs": {
+      "description": "Every field, control or data item the story names that a user supplies or a rule constrains, with only the constraints the story states.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "required": { "type": "boolean" },
+          "constraints": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "governed_by": { "type": "array", "items": { "type": "string", "pattern": "^(AC|BR|NFR)-[0-9]+$" } }
+        }
+      }
+    },
+    "roles": { "description": "Every role, user type or plan the story distinguishes, as stated.", "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "states_and_transitions": { "description": "Statuses and the transitions the story states or forbids, one per entry.", "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "data_effects": { "description": "What the story says is created, changed, removed, calculated or shown afterwards, one per entry.", "type": "array", "items": { "type": "string", "minLength": 1 } },
     "messages": {
       "description": "Exact UI texts, URLs or values the story states, so expected results can quote them.",
       "type": "array",
